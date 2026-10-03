@@ -1,0 +1,1075 @@
+<!--
+  开发日志 (按每日时间顺序)
+  ============================================================
+  261001
+    · AI辅助生成初版代码，并成功跑通第一个最基础的3D引擎界面
+    · 完成正十二面体(Dodecahedron, Doe)偏序集的顶点(Vertex)·棱(Edge)·面(Face)定义
+    · 缩放(Scaler)、旋转(Rotator)、平移(Translator)的矩阵生成函数
+  
+  261002
+    · 引入暂停(setTimeout, atime = animation time)
+    · 重构，遍历需求列表的形状生成函数
+    · 加入了删除对象的函数
+    · 登录了Netlify (GitHub: Atopia67x)
+  
+  261003
+    · 重构合并了三大类(Scaler, Rotator, Translator)矩阵生成函数，并使其在默认时输出单位矩阵
+    · 重构了形状生成函数(makeDoe)
+    · 更改了GitHub仓库(-Lucky-workshop-)的命名与简介
+  
+  ============================================================
+-->
+
+<!DOCTYPE html>
+<html lang="zh">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>十二面体矩阵变换 261001</title>
+  <style>
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      overflow: hidden;
+      background: #111;
+      font-family: system-ui, sans-serif;
+      color: #eee;
+    }
+    #canvas-wrap { position: fixed; inset: 0; }
+    #hint {
+      position: fixed;
+      left: 50%;
+      bottom: 16px;
+      transform: translateX(-50%);
+      z-index: 20;
+      padding: 8px 14px;
+      background: rgba(30, 30, 30, 0.85);
+      border: 1px solid #444;
+      border-radius: 8px;
+      font-size: 12px;
+      color: #aaa;
+      backdrop-filter: blur(6px);
+      pointer-events: none;
+    }
+    #hint b { color: #6cf; }
+  </style>
+</head>
+<body>
+
+  <div id="canvas-wrap"></div>
+
+  <div id="hint">
+    <b>左键拖</b> 旋转 ·
+    <b>滚轮</b> 缩放 ·
+    <b>右键拖</b> 平移 ·
+    <b>中键单击</b> 把鼠标位置平滑移到中心
+  </div>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+      "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <script type="module">
+    import * as THREE from 'three';
+    import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+    import { CSS2DRenderer, CSS2DObject }
+      from 'three/addons/renderers/CSS2DRenderer.js';
+
+    // ============================================================
+    // 0. 颜色
+    // ============================================================
+    const WHITE = 0xffffff
+    const GRAY_ = 0xcccccc
+    const GRAY  = 0x888888
+    const BLACK = 0x000000
+
+    const YELLOW_1 = 0xe8e23a
+    const YELLOW_1_= 0xf5f07a
+    const GREEN_1  = 0x8a9a5b
+    const GREEN_1_ = 0xb4c078
+    const GREEN_1__= 0xdee695
+    const BLUE_1   = 0x7ec8D8
+    const PURPLE_1 = 0xc9b8e0
+    const PURPLE_1_= 0xd8cdf0
+
+    const GREEN_G  = 0xa8d88b
+    const WHITE_G  = 0xffffff
+    const PURPLE_G = 0xc9b8e0
+    const BLUE_G   = 0x8bcae8
+    const YELLOW_G = 0xf5e6a3
+    const PINK_G   = 0xf0c8d8
+    
+    // ============================================================
+    // 1. 场景
+    // ============================================================
+    const scene = new THREE.Scene();
+    // ============================================================
+    // 1.5 背景渐变（Canvas 2D → THREE.CanvasTexture）
+    // ============================================================
+    function makeGradientBackground(colorTop, colorBottom) {
+      // 自动把 0xRRGGBB 数字转成 '#rrggbb'
+      const toCss = (c) =>
+        typeof c === 'number' ? '#' + c.toString(16).padStart(6, '0') : c;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = 2;
+      canvas.height = 512;
+      const ctx = canvas.getContext('2d');
+
+      const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
+      grad.addColorStop(0, toCss(colorTop));
+      grad.addColorStop(1, toCss(colorBottom));
+      ctx.fillStyle = grad;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      return new THREE.CanvasTexture(canvas);
+    }
+    scene.background = makeGradientBackground(BLUE_1, PURPLE_1);
+
+    // ============================================================
+    // 2. 正交相机
+    // ============================================================
+    let frustum = 8;
+    let aspect = window.innerWidth / window.innerHeight;
+    const camera = new THREE.OrthographicCamera(
+      -frustum * aspect, frustum * aspect,
+       frustum, -frustum, 0.1, 1000
+    );
+    camera.position.set(8, 8, 12);
+    camera.lookAt(0, 0, 0);
+
+    // ============================================================
+    // 3. 渲染器
+    // ============================================================
+    const renderer = new THREE.WebGLRenderer({ antialias: true });
+    renderer.setSize(window.innerWidth, window.innerHeight);
+    renderer.setPixelRatio(window.devicePixelRatio);
+    document.getElementById('canvas-wrap').appendChild(renderer.domElement);
+
+    // ============================================================
+    // 4. CSS2D 标签层
+    // ============================================================
+    const labelRenderer = new CSS2DRenderer();
+    labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    labelRenderer.domElement.style.position = 'absolute';
+    labelRenderer.domElement.style.top = '0';
+    labelRenderer.domElement.style.left = '0';
+    labelRenderer.domElement.style.pointerEvents = 'none';
+    document.getElementById('canvas-wrap').appendChild(labelRenderer.domElement);
+
+    // ============================================================
+    // 5. 坐标轴 + 标签
+    // ============================================================
+    
+    // ---- 1.坐标轴 ----
+
+    // 轴圆柱体
+    const AXIS_LEN = 6;         // 轴长
+    const AXIS_RADIUS = 0.04;   // 轴粗细，调大更粗
+
+    function makeAxis(dir, color) {
+      const len = AXIS_LEN;
+      const cyl = new THREE.Mesh(
+        new THREE.CylinderGeometry(AXIS_RADIUS, AXIS_RADIUS, len, 12),
+        new THREE.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.5 })
+      );
+      // 圆柱默认沿 Y 轴，转到 dir 方向
+      const up = new THREE.Vector3(0, 1, 0);
+      cyl.quaternion.setFromUnitVectors(up, dir.clone().normalize());
+      // 让轴从原点出发，中心在 len/2 处
+      cyl.position.copy(dir.clone().normalize().multiplyScalar(len / 2));
+      scene.add(cyl);
+    }
+
+    makeAxis(new THREE.Vector3(1, 0, 0), 0xff3333);   // X 红
+    makeAxis(new THREE.Vector3(0, 1, 0), 0x33ff33);   // Y 绿
+    makeAxis(new THREE.Vector3(0, 0, 1), 0x3366ff);   // Z 蓝
+
+    // 轴末端箭头（圆锥）
+    const ARROW_LEN = 0.5;       // 箭头长度
+    const ARROW_RADIUS = 0.15;   // 箭头底部半径
+
+    function makeArrow(dir, color) {
+      const d = dir.clone().normalize();
+      const cone = new THREE.Mesh(
+        new THREE.ConeGeometry(ARROW_RADIUS, ARROW_LEN, 16),
+        new THREE.MeshStandardMaterial({ color, metalness: 0.3, roughness: 0.5 })
+      );
+      // 圆锥默认沿 +Y，转到 dir 方向
+      const up = new THREE.Vector3(0, 1, 0);
+      cone.quaternion.setFromUnitVectors(up, d);
+      // 圆锥底在轴上，尖端朝外
+      cone.position.copy(d.clone().multiplyScalar(AXIS_LEN + ARROW_LEN / 2));
+      scene.add(cone);
+    }
+
+    makeArrow(new THREE.Vector3(1, 0, 0), 0xff3333);   // X 红
+    makeArrow(new THREE.Vector3(0, 1, 0), 0x33ff33);   // Y 绿
+    makeArrow(new THREE.Vector3(0, 0, 1), 0x3366ff);   // Z 蓝
+
+    // ---- 2.标签 ----
+    const labelStyle = document.createElement('style');
+    labelStyle.textContent = `
+      .label {
+        color: #6cf;
+        font-family: monospace;
+        font-size: 12px;
+        background: rgba(0,0,0,0.65);
+        padding: 1px 5px;
+        border-radius: 4px;
+        border: 1px solid #6cf;
+        pointer-events: none;
+        user-select: none;
+        white-space: nowrap;
+      }
+      .label.axis { color: #ff6; border-color: #ff6; font-size: 13px; }
+    `;
+    document.head.appendChild(labelStyle);
+
+    function makeLabel(text, position, className = 'label') {
+      const div = document.createElement('div');
+      div.className = className;
+      div.textContent = text;
+      const label = new CSS2DObject(div);
+      label.position.copy(position);
+      return label;
+    }
+
+    scene.add(makeLabel('X', new THREE.Vector3(4.4, 0, 0), 'label axis'));
+    scene.add(makeLabel('Y', new THREE.Vector3(0, 4.4, 0), 'label axis'));
+    scene.add(makeLabel('Z', new THREE.Vector3(0, 0, 4.4), 'label axis'));
+
+    // ============================================================
+    // 5. 基础几何体数据
+    // ============================================================
+    const PHI = (1 + Math.sqrt(5)) / 2;
+    const SQ5 = Math.sqrt(5)
+    const SQ3 = Math.sqrt(3)
+
+    const vertexList = [
+      [PHI, -1 / PHI, 0],
+      [PHI, 1 / PHI, 0],
+      [1, 1, 1],
+      [1 / PHI, 0, PHI],
+      [1, -1, 1],
+
+      [0, -PHI, 1 / PHI],
+      [1, -1, -1],
+      [1, 1, -1],
+      [0, PHI, 1 / PHI],
+      [-1 / PHI, 0, PHI],
+
+      [1 / PHI, 0, -PHI],
+      [0, -PHI, -1 / PHI],
+      [-1, -1, 1],
+      [-1, 1, 1],
+      [0, PHI, -1 / PHI],
+
+      [-1, 1, -1],
+      [-1 / PHI, 0, -PHI],
+      [-1, -1, -1],
+      [-PHI, -1 / PHI, 0],
+      [-PHI, 1 / PHI, 0],
+    ];
+
+    const edgeList = [
+      [0, 1], [1, 2], [2, 3], [3, 4], [4, 0],
+      [4, 5], [0, 6], [1, 7], [2, 8], [3, 9],
+
+      [6, 10], [5, 11], [9, 12], [8, 13], [7, 14],
+      [5, 12], [6, 11], [7, 10], [8, 14], [9, 13],
+
+      [10, 16], [11, 17], [12, 18], [13, 19], [14, 15],
+      [19, 15], [15, 16], [16, 17], [17, 18], [18, 19],
+    ];
+
+    const faceList = [
+      [0, 1, 2, 3, 4],
+
+      [4, 0, 6, 11, 5],
+      [0, 1, 7, 10, 6],
+      [1, 2, 8, 14, 7],
+      [2, 3, 9, 13, 8],
+      [3, 4, 5, 12, 9],
+
+      [7, 10, 16, 15, 14],
+      [6, 11, 17, 16, 10],
+      [5, 12, 18, 17, 11],
+      [9, 13, 19, 18, 12],
+      [8, 14, 15, 19, 13],
+
+      [15, 16, 17, 18, 19],
+    ];
+    
+    const PH2 = PHI ** 2;
+    const GissidAddvertexList = [
+      [1 / PHI, 0, 1 / PH2],
+
+      [1 / PH2, -1 / PHI, 0],
+      [1 / PHI, 0, -1 / PH2],
+      [1 / PH2, 1 / PHI, 0],
+      [0, 1 / PH2, 1 / PHI],
+      [0, -1 / PH2, 1 / PHI],
+
+      [0, 1 / PH2, -1 / PHI],
+      [0, -1 / PH2, -1 / PHI],
+      [-1 / PH2, -1 / PHI, 0],
+      [-1 / PHI, 0, 1 / PH2],
+      [-1 / PH2, 1 / PHI, 0],
+
+      [-1 / PHI, 0, -1 / PH2],
+    ];
+    const GissidEdgeList = [
+      [0, 20], [0, 21], [0, 22],
+      [1, 20], [1, 22], [1, 23],
+      [2, 20], [2, 23], [2, 24],
+      [3, 20], [3, 24], [3, 25],
+      [4, 20], [4, 25], [4, 21],
+
+      [5, 25], [5, 21], [5, 28],
+      [6, 21], [6, 22], [6, 27],
+      [7, 22], [7, 23], [7, 26],
+      [8, 23], [8, 24], [8, 30],
+      [9, 24], [9, 25], [9, 29],
+
+      [20, 21], [20, 22], [20, 23], [20, 24], [20, 25],
+      [25, 21], [21, 22], [22, 23], [23, 24], [24, 25],
+      [21, 27], [22, 26], [23, 30], [24, 29], [25, 28],
+      [21, 26], [22, 27], [21, 28], [25, 29], [24, 30],
+      [26, 27], [27, 28], [28, 29], [29, 30], [30, 26],
+      [26, 31], [27, 31], [28, 31], [29, 31], [30, 31],
+
+      [10, 22], [10, 26], [10, 27],
+      [11, 21], [11, 27], [11, 28],
+      [12, 25], [12, 28], [12, 29],
+      [13, 24], [13, 29], [13, 30],
+      [14, 23], [14, 30], [14, 26],
+
+      [15, 30], [15, 26], [15, 31],
+      [16, 26], [16, 27], [16, 31],
+      [17, 27], [17, 28], [17, 31],
+      [18, 28], [18, 29], [18, 31],
+      [19, 29], [19, 30], [19, 31],
+    ];
+
+    const GissidFaceList = [
+      [5, 25, 21], [6, 21, 22], [7, 22, 23], [8, 23, 24], [9, 24, 25],
+      
+      [1, 22, 20], [3, 20, 25], [12, 25, 28], [17, 28, 27], [10, 27, 22],
+      [2, 23, 20], [4, 20, 21], [11, 21, 27], [16, 27, 26], [14, 26, 23],
+      [3, 24, 20], [0, 20, 22], [10, 22, 26], [15, 26, 30], [13, 30, 24],
+      [4, 25, 20], [1, 20, 23], [14, 23, 30], [19, 30, 29], [12, 29, 25],
+      [5, 21, 20], [2, 20, 24], [13, 24, 29], [18, 29, 28], [11, 28, 21],
+
+      [8, 30, 23], [1, 23, 22], [6, 22, 27], [17, 27, 31], [14, 31, 30],
+      [7, 26, 22], [0, 22, 21], [5, 21, 28], [18, 28, 31], [15, 31, 26],
+      [6, 27, 21], [4, 21, 25], [9, 25, 29], [19, 29, 31], [16, 31, 27],
+      [5, 28, 25], [3, 25, 24], [8, 24, 30], [15, 30, 31], [17, 31, 28],
+      [9, 29, 24], [2, 24, 23], [7, 23, 26], [16, 26, 31], [18, 31, 29],
+
+      [10, 26, 27], [11, 27, 28], [12, 28, 29], [13, 29, 30], [14, 30, 26],
+    ];
+    const g = GREEN_G, b = BLUE_G, w = WHITE_G, p = PURPLE_G, y = YELLOW_G, pk = PINK_G;
+    const GissidFaceColor = [
+      g, g, g, g, g,
+
+      b, b, b, b, b,
+      pk, pk, pk, pk, pk,
+      w, w, w, w, w,
+      p, p, p, p, p,
+      y, y, y, y, y,
+
+      y, y, y, y, y,
+      p, p, p, p, p,
+      w, w, w, w, w,
+      pk, pk, pk, pk, pk,
+      b, b, b, b, b,
+
+      g, g, g, g, g,
+    ];
+
+    // ============================================================
+    // 6. 旋转矩阵与缩放矩阵
+    // ============================================================
+    /*
+      -----
+      注意：
+        这里的矩阵存储分为“行优先”和“列优先”两种：
+          1.仅当调用set函数时是行优先，与一般数学约定一致
+          2.仅当直接赋值elements是列优先，与一般数学约定相反
+        优先的取得取决于哪一种排版更方便
+          3.transpose()是转置矩阵，解决了行列优先冲突的问题
+      -----
+    */
+
+    // ---- 1. 缩放(Scaler)矩阵生成函数 ----
+    function Scaler(mode='identity', k=1, m=5, n=3) {
+      const am = Math.PI / m, an = Math.PI / n;
+      // 棱面心角
+      const cos_theta_EF = Math.cos(an) / Math.sin(am);
+      const a = cos_theta_EF ** 2;
+      // 点面心角
+      const cos_theta_VF = 1 / Math.tan(an) / Math.tan(am);
+      const b = cos_theta_VF ** 2;
+      // 点棱心角
+      const cos_theta_VE = Math.cos(am) / Math.sin(an);
+      const c = cos_theta_VE ** 2;
+      
+      if (mode === 'identity') {
+        return new THREE.Matrix4().set(
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1,
+        );
+      }
+      else if (mode === 'face') {
+        return new THREE.Matrix4().set(
+          1, 0, k-1, 0,
+          0, 1, k-1, 0,
+          0, 0, k,   0,
+          0, 0, 0,   1,
+        ).transpose();
+      }
+      else if (mode === 'edge') {
+        return new THREE.Matrix4().set(
+          1, k-1,    0, 0,
+          0, k,      0, 0,
+          0,(k-1)*a, 1, 0,
+          0, 0,      0, 1,
+        ).transpose();
+      }
+      else if (mode === 'vertex') {
+        return new THREE.Matrix4().set(
+           k,      0, 0, 0,
+          (k-1)*c, 1, 0, 0,
+          (k-1)*b, 0, 1, 0,
+           0,      0, 0, 1,
+        ).transpose();
+      }
+      else if (mode === 'triconvergency') {
+        const alpha = Math.atan(PHI / SQ3);
+        const theta_VE = Math.acos(cos_theta_VE);
+        const s = Math.sqrt(1 - k**2) / Math.tan(alpha) / Math.tan(theta_VE);
+        
+        return new THREE.Matrix4().set(
+          -s+k,  -s,-s*a, 0,
+          1+s-k, 1+s, s*a, 0,
+              0,   0,   1, 0,
+              0,   0,   0, 1,
+        )
+        .multiply(Scaler('edge', Math.sin(alpha)));
+      }
+      else if (mode === 'biconvergency') {
+        const alpha = 72 * Math.PI / 180;
+        const theta_VF = Math.acos(cos_theta_VF);
+        // 正五边形的点棱心角
+        const cos_theta_5VE = Math.cos(am);
+        const d = cos_theta_5VE ** 2;
+
+        const s = -Math.sqrt(1 - k**2) / Math.tan(alpha) / Math.tan(theta_VF);
+        
+        return new THREE.Matrix4().set(
+          -s+k, -s+(k-1)*d,  -s, 0,
+              0,     1,        0, 0,
+          1+s-k,  s-(k-1)*d, 1+s, 0,
+              0,     0,        0, 1,
+        )
+        .multiply(Scaler('face', Math.sin(alpha)));
+      }
+    }
+
+    // 正交(VEF)与直角(XYZ)坐标系的转换矩阵
+    function doeAffined() {
+      return new THREE.Matrix4().set(
+        0,-PH2,    0, 0,
+        1, PH2, -PHI, 0,
+        0,   0,  SQ5, 0,
+        0,   0,    0, 1,
+      );
+    }
+
+    // 向量平均值
+    function getAverage(source, sets) {
+      const {
+        vList, eList, fList,
+      } = source;
+      let res = [0, 0, 0];
+      let cnt = 0;
+      for (const v of sets) {
+        const [i, j, k] = res;
+        const [x, y, z] = vList[v];
+        res = [
+          (i * cnt + x) / (cnt + 1),
+          (j * cnt + y) / (cnt + 1),
+          (k * cnt + z) / (cnt + 1),
+        ];
+        cnt++;
+      }
+      return res;
+    }
+
+    // ---- 2. 旋转(Rotator)矩阵生成函数 ----
+    function makeRotator(source, vertex, edge, face) {
+      function multi(vec) {
+        const [x, y, z] = vec;
+        const M = doeAffined();
+        const v = new THREE.Vector3(x, y, z);
+        v.applyMatrix4(M);
+        return [v.x, v.y, v.z];
+        // (XYZ -> VEF)坐标系转换过后的坐标
+      }
+
+      let [vx, vy, vz] = multi(getAverage(source, vertex));
+      let [ex, ey, ez] = multi(getAverage(source, edge));
+      let [fx, fy, fz] = multi(getAverage(source, face));
+
+      return new THREE.Matrix4().set(
+        vx, ex, fx, 0,
+        vy, ey, fy, 0,
+        vz, ez, fz, 0,
+         0,  0,  0, 1,
+      );
+    }
+
+    function Rotator(mode='identity', source=[,,], id=0) {
+      // source是顶点集、棱集和面集的集合，决定了旋转的对称群
+      const {
+        vList, eList, fList,
+      } = source;
+
+      let face, edge, vertex;
+      if (mode === 'identity') {
+        return new THREE.Matrix4().set(
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1,
+        );
+      }
+      else if (mode === 'face') {
+        face = fList[id];
+        edge = face.slice(0, 2);
+        vertex = face.slice(0, 1);
+      }
+      else if (mode === 'edge') {
+        edge = eList[id];
+        vertex = edge.slice(0, 1);
+        face = fList.find(
+          f => f.includes(edge[0]) && f.includes(edge[1])
+        );
+      }
+      else if (mode === 'vertex') {
+        vertex = [id];
+        edge = eList.find(
+          e => e.includes(vertex[0])
+        );
+        face = fList.find(
+          f => f.includes(edge[0]) && f.includes(edge[1])
+        );
+      }
+
+      return makeRotator(source, vertex, edge, face);
+    }
+
+    // 120Cell胞方向第4层, 特异的旋转
+    function edgeRotatorSpecially(source, id) {
+      const {
+        vList, eList, fList,
+      } = source;
+      let [x, y, z] = getAverage(source, eList[id]);
+      let r2 = x*x + y*y + z*z;
+      let r = Math.sqrt(r2);
+
+      return new THREE.Matrix4().set(
+        x*x/r2,       x*y/r2 - z/r, x*z/r2 + y/r, 0,
+        x*y/r2 + z/r, y*y/r2,       y*z/r2 - x/r, 0,
+        x*z/r2 - y/r, y*z/r2 + x/r, z*z/r2,       0,
+        0, 0, 0, 1,
+      );
+    }
+
+    // ---- 3. 平移(Translator)矩阵生成函数 ----
+    function makeTranslator(vec) {
+      let [x, y, z] = vec;
+      return new THREE.Matrix4().set(
+        1, 0, 0, x,
+        0, 1, 0, y,
+        0, 0, 1, z,
+        0, 0, 0, 1,
+      );
+    }
+
+    function Translator(mode='identity', source=[,,], id=0, k=1) {
+      const {
+        vList, eList, fList,
+      } = source;
+
+      let x, y, z;
+      if (mode === 'identity') {
+        [x, y, z] = [0, 0, 0];
+      }
+      else if (mode === 'face') {
+        [x, y, z] = getAverage(source, fList[id]);
+      }
+      else if (mode === 'edge') {
+        [x, y, z] = getAverage(source, eList[id]);
+      }
+      else if (mode === 'vertex') {
+        [x, y, z] = vList[id];
+      }
+
+      return makeTranslator([k*x, k*y, k*z]);
+    }
+
+    // ============================================================
+    // 7. 核心函数：变换几何体 + 渲染副本
+    // ============================================================
+
+    // 共轭矩阵
+    function conjugater(scaler, rotater) {
+      const aff  = doeAffined().clone();
+      const rot  = rotater.clone();
+      const self = scaler.clone();
+      const rotinv = rot.clone().invert();
+      const affinv = aff.clone().invert();
+      
+      return affinv
+        .multiply(rot)
+        .multiply(self)
+        .multiply(rotinv)
+        .multiply(aff);
+    }
+
+    const spawnedGroups = [];
+
+    function makeShapeTransformed(source, scaler, rotator, translator, opts = {}) {
+      const {
+        vList, eList, fList,
+      } = source;
+
+      const {
+        colormode,
+        colours = [WHITE, WHITE, WHITE], // colormode === 0时传面、棱、点的颜色, colormode === 1时传每个面的颜色数组
+        showEdges = true,
+        showVertice = true,
+        name = 'unnamed',
+      } = opts;
+      let faceColor, edgeColor, vertexColor;
+      if (colormode === 0) {
+        [faceColor, edgeColor, vertexColor] = colours;
+      } else if (colormode === 1) {
+        faceColor = colours;
+      }
+      
+      const transformer = translator.clone().multiply(conjugater(scaler, rotator))
+      const newVertice = vList.map(v => {
+        const p = new THREE.Vector3(v[0], v[1], v[2]);
+        p.applyMatrix4(transformer);
+        return [p.x, p.y, p.z];
+      });
+
+      const group = new THREE.Group();
+      group.name = name;
+      
+      // 渲染顶点
+      if (showVertice) {
+        const pg = new THREE.BufferGeometry();
+        const arr = new Float32Array(newVertice.length * 3);
+        newVertice.forEach((v, i) => {
+          arr[i*3] = v[0]; arr[i*3+1] = v[1]; arr[i*3+2] = v[2];
+        });
+        pg.setAttribute('position', new THREE.BufferAttribute(arr, 3));
+        group.add(new THREE.Points(pg, new THREE.PointsMaterial({
+          color: vertexColor, size: 6, sizeAttenuation: false,
+        })));
+      }
+      
+      // 渲染棱（圆柱体）
+      if (showEdges) {
+        const edgeMat = new THREE.MeshStandardMaterial({
+          color: edgeColor, metalness: 0.3, roughness: 0.6,
+        });
+        const up = new THREE.Vector3(0, 1, 0);
+        const R = 0.02;
+
+        for (const [i, j] of eList) {
+          const a = new THREE.Vector3(...newVertice[i]);
+          const b = new THREE.Vector3(...newVertice[j]);
+          const dir = new THREE.Vector3().subVectors(b, a);
+          const len = dir.length();
+          const cyl = new THREE.Mesh(
+            new THREE.CylinderGeometry(R, R, len, 8), edgeMat
+          );
+          cyl.position.copy(a).addScaledVector(dir, 0.5);
+          cyl.quaternion.setFromUnitVectors(up, dir.clone().normalize());
+          group.add(cyl);
+        }
+      }
+      
+      // 渲染面：每个面独立一个 mesh，颜色来自 faceColor
+      for (let fi = 0; fi < fList.length; fi++) {
+        const f = fList[fi];
+        let color;
+        if (colormode === 0) {
+          color = faceColor;
+        } else if (colormode === 1) {
+          color = faceColor[fi];
+        }
+
+        const fpos = [], fnrm = [];
+        const p0 = new THREE.Vector3(...newVertice[f[0]]);
+        const p1 = new THREE.Vector3(...newVertice[f[1]]);
+        const p2 = new THREE.Vector3(...newVertice[f[2]]);
+        const n = new THREE.Vector3()
+          .subVectors(p1, p0)
+          .cross(new THREE.Vector3().subVectors(p2, p0)).normalize();
+
+        const center = new THREE.Vector3(
+          f.reduce((s, i) => s + newVertice[i][0], 0) / f.length,
+          f.reduce((s, i) => s + newVertice[i][1], 0) / f.length,
+          f.reduce((s, i) => s + newVertice[i][2], 0) / f.length,
+        );
+        if (n.dot(center) < 0) n.negate();
+
+        for (let k = 1; k < f.length - 1; k++) {
+          const a = new THREE.Vector3(...newVertice[f[0]]);
+          const b = new THREE.Vector3(...newVertice[f[k]]);
+          const c = new THREE.Vector3(...newVertice[f[k + 1]]);
+          const cross = new THREE.Vector3()
+            .subVectors(b, a)
+            .cross(new THREE.Vector3().subVectors(c, a));
+          if (cross.dot(n) < 0) {
+            fpos.push(a.x, a.y, a.z, c.x, c.y, c.z, b.x, b.y, b.z);
+          } else {
+            fpos.push(a.x, a.y, a.z, b.x, b.y, b.z, c.x, c.y, c.z);
+          }
+          fnrm.push(n.x, n.y, n.z, n.x, n.y, n.z, n.x, n.y, n.z);
+        }
+
+        const fg = new THREE.BufferGeometry();
+        fg.setAttribute('position', new THREE.Float32BufferAttribute(fpos, 3));
+        fg.setAttribute('normal',   new THREE.Float32BufferAttribute(fnrm, 3));
+
+        const fm = new THREE.MeshStandardMaterial({
+          color: color,
+          metalness: 0.0, roughness: 0.7,
+          flatShading: true, side: THREE.DoubleSide,
+        });
+
+        group.add(new THREE.Mesh(fg, fm));
+      }
+
+      scene.add(group);
+      spawnedGroups.push(group);
+      return { vList: newVertice, eList, fList, group };
+    }
+
+    // ============================================================
+    // 8. 基础几何体
+    // ============================================================
+
+    const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+    
+    // 增加展示对象
+    function adds(source, scaler, rotator, translator, colormode, colortype, name) {
+      /*
+        colormode === 0: 常值颜色, colortype输入面、棱颜色
+        colormode === 1: 自定义颜色, colortype输入所有面的颜色定义数组
+      */
+      let colours;
+      if (colormode === 0) {
+        const {colour, colour2} = colortype;
+        colours = [colour, colour2, colour];
+      } else if (colormode === 1) {
+        colours = colortype;
+      }
+
+      return makeShapeTransformed(
+        source,
+        scaler, rotator, translator,
+        {
+          colormode: colormode,
+          colours: colours,
+          showEdges: 1,
+          showVertice: 0,
+          name: name,
+        },
+      );
+    }
+    // 删除名为name的对象
+    function deletes(name) {
+      const targets = scene.children.filter(c => c.name === name);
+      for (const g of targets) {
+        scene.remove(g);
+        // 释放内存
+        g.traverse(o => {
+          if (o.geometry) o.geometry.dispose()
+          if (o.material) {
+            if (Array.isArray(o.material))
+              o.material.forEach(m => m.dispose());
+            else o.material.dispose();
+          }
+        });
+      }
+      return 0;
+    }
+
+    const modes = ['identity', 'face', 'vertex', 'face', 'edge'];
+    const colours = [
+      {colour: YELLOW_1, colour2: YELLOW_1_},
+      {colour: GREEN_1_, colour2: GREEN_1__},
+      {colour: BLUE_1,   colour2: BLUE_1   },
+      {colour: PURPLE_1, colour2: PURPLE_1_},
+      {colour: WHITE,    colour2: WHITE    },
+    ];
+    const colorName = ['yellow', 'green', 'blue', 'purple', 'white'];
+
+    const scalesNum = [
+      1,
+      -PHI / 2,
+      -1 / 2,
+      1 / PHI / 2,
+      0,
+    ];
+    const radiusNum = [
+      0,
+      SQ5 * PHI / 2,
+      (PHI ** 3) / 2,
+      SQ5 * (PHI ** 2) / 2,
+      PHI ** 2 + 0.001,
+    ];
+
+    function makeDoe(layer, source, id) {
+      const mode = modes[layer], colour = colours[layer], colorname = colorName[layer];
+      const scalesnum = scalesNum[layer], radiusnum = radiusNum[layer];
+      
+      const scale = Scaler(mode, scalesnum);
+      const rotate = Rotator(mode, source, id);
+      let translate = Translator(mode, source, id, radiusnum);
+
+      // 120Cell胞方向第4层, 特异的旋转
+      if (layer === 4) {
+        translate = edgeRotatorSpecially(source, id).multiply(translate);
+      }
+      
+      return adds(
+        source,
+        scale,
+        rotate,
+        translate,
+        0,
+        colour,
+        colorname + id,
+      );
+    }
+
+    /*
+    const Gissid = { vList: [...vertexList, ...GissidAddvertexList], eList: GissidEdgeList, fList: GissidFaceList };
+    function makeGissid() {
+      return makeShapeTransformed(
+        Gissid,
+        identity(), identity(), identity(),
+        {
+          colormode: 1,
+          colours: GissidFaceColor,
+          showEdges: 1,
+          showVertexs: 0,
+          name: "Gissid",
+        },
+      );
+    }
+    makeGissid();
+    */
+
+    /*const spawnmode = [
+      {colour: YELLOW_1, colour2: YELLOW_1_}
+    ]*/
+    const startList = [
+      [4, 10], [4, 11], [4, 12], [4, 13], [4, 14],
+      [4, 15], [4, 16], [4, 17], [4, 18], [4, 19],
+      [4, 20], [4, 21], [4, 22], [4, 23], [4, 24],
+      [4, 25], [4, 26], [4, 27], [4, 28], [4, 29],
+    ];
+    const showList = [
+      [3, 11],
+      [2, 17], [2, 18], [2, 19], [2, 15], [2, 16],
+      [3, 7],  [3, 8],  [3, 9],  [3, 10], [3, 6],
+      [1, 11],
+      [2, 10], [2, 11], [2, 12], [2, 13], [2, 14],
+      [1, 7],  [1, 8],  [1, 9],  [1, 10], [1, 6],
+      [2, 6],  [2, 5],  [2, 9],  [2, 8],  [2, 7],
+      [0, 0],
+      [1, 1],  [1, 2],  [1, 5],  [1, 4],  [1, 3],
+      [3, 3],  [3, 2],  [3, 1],  [3, 5],  [3, 4],
+      [1, 0],
+      [2, 1],  [2, 0],  [2, 4],  [2, 3],  [2, 2],
+      [3, 0],
+    ];
+
+    
+    const Doe = { vList: vertexList, eList: edgeList, fList: faceList };
+    
+    async function main() {
+      for (const [k, i] of startList) {
+        makeDoe(k, Doe, i);
+      }
+      
+      await sleep(2000);
+      
+      for (const [k, i] of showList) {
+        if(k !== 0) {
+          await sleep(100);
+        }
+        makeDoe(k, Doe, i);
+        if(k !== 0) {
+          await sleep(100);
+        }
+      }
+    }
+    async function rewind() {
+      await sleep(100);
+      
+      for (const [k, i] of [...showList].reverse()) {
+        if(k !== 0) {
+          await sleep(100);
+        }
+        deletes(colorName[k] + i);
+        if(k !== 0) {
+          await sleep(100);
+        }
+      }
+    }
+    async function act() {
+      while (true) {
+        await main();
+        await sleep(500);
+        await rewind();
+        await sleep(500);
+      }
+    }
+    act()
+    
+    // ============================================================
+    // 9. 灯光
+    // ============================================================
+    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+
+    const hemi = new THREE.HemisphereLight(0xffffff, 0x555577, 0.5);
+    scene.add(hemi);
+
+    const key = new THREE.DirectionalLight(0xffffff, 1.0);
+    key.position.set(6, 10, 8);
+    scene.add(key);
+
+    const fill = new THREE.DirectionalLight(0x88aaff, 0.7);
+    fill.position.set(-6, -4, -8);
+    scene.add(fill);
+
+    const rim = new THREE.DirectionalLight(0xffaa66, 0.3);
+    rim.position.set(0, -8, 4);
+    scene.add(rim);
+
+    // ============================================================
+    // 10. OrbitControls
+    // ============================================================
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.target.set(0, 0, 0);
+    controls.mouseButtons = {
+      LEFT:   THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT:  THREE.MOUSE.PAN,
+    };
+
+    // ============================================================
+    // 11. 中键单击 → 平滑聚焦
+    // ============================================================
+    const raycaster = new THREE.Raycaster();
+    const mouseNDC = new THREE.Vector2();
+
+    renderer.domElement.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+    renderer.domElement.addEventListener('auxclick', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+
+    let animating = false;
+    let animStartTarget, animEndTarget, animStartPos, animEndPos;
+    let animT = 0;
+    const ANIM_DURATION = 18;
+
+    function startFocus(hitPoint) {
+      const offset = hitPoint.clone().sub(controls.target);
+      animStartTarget = controls.target.clone();
+      animEndTarget   = controls.target.clone().add(offset);
+      animStartPos    = camera.position.clone();
+      animEndPos      = camera.position.clone().add(offset);
+      animT = 0;
+      animating = true;
+    }
+
+    function updateFocusAnimation() {
+      if (!animating) return;
+      animT++;
+      const k = Math.min(animT / ANIM_DURATION, 1);
+      const ease = 1 - Math.pow(1 - k, 3);
+      controls.target.lerpVectors(animStartTarget, animEndTarget, ease);
+      camera.position.lerpVectors(animStartPos, animEndPos, ease);
+      controls.update();
+      if (k >= 1) animating = false;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (e.button !== 1) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouseNDC.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+      mouseNDC.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouseNDC, camera);
+      const planeNormal = new THREE.Vector3();
+      camera.getWorldDirection(planeNormal);
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        planeNormal, controls.target
+      );
+      const hitPoint = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(plane, hitPoint)) {
+        startFocus(hitPoint);
+      }
+    });
+
+    // ============================================================
+    // 12. 窗口自适应
+    // ============================================================
+    window.addEventListener('resize', () => {
+      aspect = window.innerWidth / window.innerHeight;
+      camera.left   = -frustum * aspect;
+      camera.right  =  frustum * aspect;
+      camera.top    =  frustum;
+      camera.bottom = -frustum;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ============================================================
+    // 13. 动画循环
+    // ============================================================
+    function animate() {
+      requestAnimationFrame(animate);
+      updateFocusAnimation();
+      controls.update();
+      renderer.render(scene, camera);
+      labelRenderer.render(scene, camera);
+    }
+    animate();
+  </script>
+</body>
+</html>
