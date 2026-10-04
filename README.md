@@ -1,5 +1,6 @@
 
-# Welcome to lucky workshop!～ 欢迎来到络琪玩具厂!
+# Welcome to lucky workshop!
+# 欢迎来到络琪玩具厂!
 
 Personal·magical·works~ 存放个人神秘作品的地方~
 
