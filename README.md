@@ -1,5 +1,5 @@
 # Welcome to *Lucky workshop*!
-欢迎来到 *络琪 玩具厂*!
+欢迎来到 <mark>*络琪 玩具厂*</mark>!
 
 - Personal *magical* works~ ₍^˶ ╸𖥦  ╸˵^₎⟆\
 存放个人神秘作品的地方~
@@ -16,11 +16,14 @@
 A visual and interactive project dedicated to the <mark>120-cell</mark>~ \
 目前服务于 <mark>正一百二十胞体</mark> 的可视化交互项目～ 
 
+## 120cell·3D-engine
+<mark>正一百二十胞体的3D引擎</mark>
+
 <kbd>How do I make it?</kbd> \
-Hand-derived ***math*** · AI-assisted ***code***
+Hand-derived ***math*** · AI-assisted ***code*** \
 **核心数学由作者手推**，AI 主要用于代码框架与实现
 
-#### 3D引擎 功能实现与短期计划（2026.10）
+### 功能实现与短期计划（2026.10）
 请参考[开发日志](./开发日志.md)，可运行的[HTML源代码](./index.html)
 
 - [x] 3D引擎的页面（10.1）
