@@ -1,7 +1,7 @@
 <!--
   ============================================================
   120Cell投影形状 3D引擎
-  (v0.0.3)
+  (v0.0.4)
   详细日志: 见 开发日志.md
   ============================================================
 -->
@@ -38,17 +38,61 @@
       pointer-events: none;
     }
     #hint b { color: #6cf; }
+    #hint.recording {
+      color: #ff4444;
+      border-color: #ff4444;
+      background: rgba(60, 0, 0, 0.85);
+    }
+    #hint.recording b {
+      color: #ff6666;
+    }
+
+    #ui {
+      position: fixed;
+      top: 20px;
+      right: 20px;
+      z-index: 30;
+      display: flex;
+      gap: 8px;
+    }
+    #ui button {
+      padding: 8px 14px;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+    }
+    #ui button:active {
+      transform: scale(0.96);
+    }
+    #ui button.active {
+      background: #6cf;
+      color: #111;
+      border-color: #6cf;
+    }
+    #ui button:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+    }
+
   </style>
 </head>
 <body>
 
   <div id="canvas-wrap"></div>
 
+  <div id="ui">
+  <button id="btn-start">开始录制</button>
+  <button id="btn-stop">停止并下载</button>
+  </div>
+
   <div id="hint">
-    <b>左键拖</b> 旋转 ·
+    推荐使用 Chrome 浏览器 · <b>左键拖</b> 旋转 ·
     <b>滚轮</b> 缩放 ·
     <b>右键拖</b> 平移 ·
-    <b>中键单击</b> 把鼠标位置平滑移到中心
+    <b>中键单击</b> 移至中心
   </div>
 
   <script type="importmap">
@@ -67,7 +111,7 @@
       from 'three/addons/renderers/CSS2DRenderer.js';
 
     // ============================================================
-    // 0. 颜色
+    // a.0. 颜色
     // ============================================================
     const WHITE = 0xffffff
     const GRAY_ = 0xcccccc
@@ -91,12 +135,15 @@
     const PINK_G   = 0xf0c8d8
     
     // ============================================================
-    // 1. 场景
+    // a.1. 场景
     // ============================================================
+
     const scene = new THREE.Scene();
+
     // ============================================================
-    // 1.5 背景渐变（Canvas 2D → THREE.CanvasTexture）
+    // a.2. 背景渐变（Canvas 2D → THREE.CanvasTexture）
     // ============================================================
+
     function makeGradientBackground(colorTop, colorBottom) {
       // 自动把 0xRRGGBB 数字转成 '#rrggbb'
       const toCss = (c) =>
@@ -118,7 +165,7 @@
     scene.background = makeGradientBackground(BLUE_1, PURPLE_1);
 
     // ============================================================
-    // 2. 正交相机
+    // a.3. 正交相机
     // ============================================================
     let frustum = 8;
     let aspect = window.innerWidth / window.innerHeight;
@@ -130,15 +177,20 @@
     camera.lookAt(0, 0, 0);
 
     // ============================================================
-    // 3. 渲染器
+    // a.4. 渲染器
     // ============================================================
     const renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
     renderer.setPixelRatio(window.devicePixelRatio);
     document.getElementById('canvas-wrap').appendChild(renderer.domElement);
 
+    // 禁浏览器右键菜单 (仅在3D画布区域)
+    document.addEventListener('contextmenu', (e) => {
+      e.preventDefault();
+    });
+
     // ============================================================
-    // 4. CSS2D 标签层
+    // a.5. CSS2D 标签层
     // ============================================================
     const labelRenderer = new CSS2DRenderer();
     labelRenderer.setSize(window.innerWidth, window.innerHeight);
@@ -149,16 +201,127 @@
     document.getElementById('canvas-wrap').appendChild(labelRenderer.domElement);
 
     // ============================================================
-    // 5. 坐标轴 + 标签
+    // a.6. OrbitControls
+    // ============================================================
+    const controls = new OrbitControls(camera, renderer.domElement);
+    controls.enableDamping = true;
+    controls.dampingFactor = 0.1;
+    controls.target.set(0, 0, 0);
+    controls.mouseButtons = {
+      LEFT:   THREE.MOUSE.ROTATE,
+      MIDDLE: THREE.MOUSE.PAN,
+      RIGHT:  THREE.MOUSE.PAN,
+    };
+
+    // ============================================================
+    // a.7. 中键单击 → 平滑聚焦
+    // ============================================================
+    const raycaster = new THREE.Raycaster();
+    const mouseNDC = new THREE.Vector2();
+
+    renderer.domElement.addEventListener('mousedown', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+    renderer.domElement.addEventListener('auxclick', (e) => {
+      if (e.button === 1) e.preventDefault();
+    });
+
+    let animating = false;
+    let animStartTarget, animEndTarget, animStartPos, animEndPos;
+    let animT = 0;
+    const ANIM_DURATION = 18;
+
+    function startFocus(hitPoint) {
+      const offset = hitPoint.clone().sub(controls.target);
+      animStartTarget = controls.target.clone();
+      animEndTarget   = controls.target.clone().add(offset);
+      animStartPos    = camera.position.clone();
+      animEndPos      = camera.position.clone().add(offset);
+      animT = 0;
+      animating = true;
+    }
+
+    let isRotating = true; // 旋转的开机按钮
+
+    const hintEl = document.getElementById('hint');
+    let hintState = null;   // 记录当前提示状态，避免每帧重建
+
+    // 下方提示更新
+    function updateHint() {
+      if (isRotating) {
+        if (hintState !== 'rotating') {
+          hintEl.textContent = '● 相机自动旋转中 · 当前状态禁用交互';
+          hintEl.classList.add('recording');
+          hintState = 'rotating';
+        }
+      } else {
+        if (hintState !== 'idle') {
+          hintEl.innerHTML = '推荐使用 Chrome 浏览器 · <b>左键拖</b> 旋转 · <b>滚轮</b> 缩放 · <b>右键拖</b> 平移 · <b>中键单击</b> 移至中心';
+          hintEl.classList.remove('recording');
+          hintState = 'idle';
+        }
+      }
+    }
+    updateHint();
+
+    // 中键聚焦
+    function updateFocusAnimation() {
+      if (!animating) return;
+      if (isRotating) return; // 旋转演示时禁用中键聚焦
+      animT++;
+      const k = Math.min(animT / ANIM_DURATION, 1);
+      const ease = 1 - Math.pow(1 - k, 3);
+      controls.target.lerpVectors(animStartTarget, animEndTarget, ease);
+      camera.position.lerpVectors(animStartPos, animEndPos, ease);
+      
+      controls.update();
+      if (k >= 1) animating = false;
+    }
+
+    renderer.domElement.addEventListener('pointerdown', (e) => {
+      if (e.button !== 1) return;
+      const rect = renderer.domElement.getBoundingClientRect();
+      mouseNDC.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
+      mouseNDC.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
+
+      raycaster.setFromCamera(mouseNDC, camera);
+      const planeNormal = new THREE.Vector3();
+      camera.getWorldDirection(planeNormal);
+      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
+        planeNormal, controls.target
+      );
+      const hitPoint = new THREE.Vector3();
+      if (raycaster.ray.intersectPlane(plane, hitPoint)) {
+        startFocus(hitPoint);
+      }
+    });
+
+    // ============================================================
+    // a.8. 窗口自适应
+    // ============================================================
+
+    window.addEventListener('resize', () => {
+      aspect = window.innerWidth / window.innerHeight;
+      camera.left   = -frustum * aspect;
+      camera.right  =  frustum * aspect;
+      camera.top    =  frustum;
+      camera.bottom = -frustum;
+      camera.updateProjectionMatrix();
+      renderer.setSize(window.innerWidth, window.innerHeight);
+      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+    });
+
+    // ============================================================
+    // b.1. 绘制坐标轴
     // ============================================================
     
-    // ---- 1.坐标轴 ----
+    // ---- 1. 绘制坐标轴线 ----
 
     // 轴圆柱体
-    const AXIS_LEN = 6;         // 轴长
-    const AXIS_RADIUS = 0.04;   // 轴粗细，调大更粗
+    const AXIS_LEN = 6; // 轴长
+    const AXIS_RADIUS = 0.04; // 轴粗细，调大更粗
 
-    function makeAxis(dir, color) {
+    function makeAxisline(dir, color) {
       const len = AXIS_LEN;
       const cyl = new THREE.Mesh(
         new THREE.CylinderGeometry(AXIS_RADIUS, AXIS_RADIUS, len, 12),
@@ -172,13 +335,9 @@
       scene.add(cyl);
     }
 
-    makeAxis(new THREE.Vector3(1, 0, 0), 0xff3333);   // X 红
-    makeAxis(new THREE.Vector3(0, 1, 0), 0x33ff33);   // Y 绿
-    makeAxis(new THREE.Vector3(0, 0, 1), 0x3366ff);   // Z 蓝
-
-    // 轴末端箭头（圆锥）
-    const ARROW_LEN = 0.5;       // 箭头长度
-    const ARROW_RADIUS = 0.15;   // 箭头底部半径
+    // ---- 2. 绘制轴箭头（圆锥） ----
+    const ARROW_LEN = 0.5; // 箭头长度
+    const ARROW_RADIUS = 0.15; // 箭头底部半径
 
     function makeArrow(dir, color) {
       const d = dir.clone().normalize();
@@ -194,11 +353,8 @@
       scene.add(cone);
     }
 
-    makeArrow(new THREE.Vector3(1, 0, 0), 0xff3333);   // X 红
-    makeArrow(new THREE.Vector3(0, 1, 0), 0x33ff33);   // Y 绿
-    makeArrow(new THREE.Vector3(0, 0, 1), 0x3366ff);   // Z 蓝
-
-    // ---- 2.标签 ----
+    // ---- 3. 标签 ----
+    const LABEL_RADIUS = 6.5; // 标签与原点的距离
     const labelStyle = document.createElement('style');
     labelStyle.textContent = `
       .label {
@@ -226,12 +382,29 @@
       return label;
     }
 
-    scene.add(makeLabel('X', new THREE.Vector3(4.4, 0, 0), 'label axis'));
-    scene.add(makeLabel('Y', new THREE.Vector3(0, 4.4, 0), 'label axis'));
-    scene.add(makeLabel('Z', new THREE.Vector3(0, 0, 4.4), 'label axis'));
+    // 绘制坐标轴
+    function makeAxis(xAxis, yAxis, zAxis, labels, r) {
+      const [xLabel, yLabel, zLabel] = labels
+      const xrAxis = xAxis.map(i => r * i);
+      const yrAxis = yAxis.map(i => r * i);
+      const zrAxis = zAxis.map(i => r * i);
 
+      makeAxisline(new THREE.Vector3(...xAxis), 0xff3333);   // X 红
+      makeAxisline(new THREE.Vector3(...yAxis), 0x33ff33);   // Y 绿
+      makeAxisline(new THREE.Vector3(...zAxis), 0x3366ff);   // Z 蓝
+
+      makeArrow(new THREE.Vector3(...xAxis), 0xff3333);   // X 红
+      makeArrow(new THREE.Vector3(...yAxis), 0x33ff33);   // Y 绿
+      makeArrow(new THREE.Vector3(...zAxis), 0x3366ff);   // Z 蓝
+
+      scene.add(makeLabel(xLabel, new THREE.Vector3(...xrAxis), 'label axis'));
+      scene.add(makeLabel(yLabel, new THREE.Vector3(...yrAxis), 'label axis'));
+      scene.add(makeLabel(zLabel, new THREE.Vector3(...zrAxis), 'label axis'));
+    }
+    //makeAxis([1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
+    
     // ============================================================
-    // 5. 基础几何体数据
+    // b.2. 基础几何体数据
     // ============================================================
     const PHI = (1 + Math.sqrt(5)) / 2;
     const SQ5 = Math.sqrt(5)
@@ -380,7 +553,7 @@
     ];
 
     // ============================================================
-    // 6. 旋转矩阵与缩放矩阵
+    // b.3. 旋转矩阵与缩放矩阵
     // ============================================================
     /*
       -----
@@ -481,48 +654,30 @@
     }
 
     // 向量平均值
-    function getAverage(source, sets) {
-      const {
-        vList, eList, fList,
-      } = source;
+    function getAverage(vecList) {
       let res = [0, 0, 0];
       let cnt = 0;
-      for (const v of sets) {
+      for (const v of vecList) {
         const [i, j, k] = res;
-        const [x, y, z] = vList[v];
+        const [x, y, z] = v;
         res = [
           (i * cnt + x) / (cnt + 1),
           (j * cnt + y) / (cnt + 1),
           (k * cnt + z) / (cnt + 1),
-        ];
+        ] ;
         cnt++;
       }
       return res;
     }
 
-    // ---- 2. 旋转(Rotator)矩阵生成函数 ----
-    function makeRotator(source, vertex, edge, face) {
-      function multi(vec) {
-        const [x, y, z] = vec;
-        const M = doeAffined();
-        const v = new THREE.Vector3(x, y, z);
-        v.applyMatrix4(M);
-        return [v.x, v.y, v.z];
-        // (XYZ -> VEF)坐标系转换过后的坐标
-      }
-
-      let [vx, vy, vz] = multi(getAverage(source, vertex));
-      let [ex, ey, ez] = multi(getAverage(source, edge));
-      let [fx, fy, fz] = multi(getAverage(source, face));
-
-      return new THREE.Matrix4().set(
-        vx, ex, fx, 0,
-        vy, ey, fy, 0,
-        vz, ez, fz, 0,
-         0,  0,  0, 1,
-      );
+    function vecToElement(source, sets) {
+      const {
+        vList, eList, fList,
+      } = source;
+      return getAverage(sets.map(i => vList[i]));
     }
 
+    // ---- 2. 旋转(Rotator)矩阵生成函数 ----
     function Rotator(mode='identity', source=[,,], id=0) {
       // source是顶点集、棱集和面集的集合，决定了旋转的对称群
       const {
@@ -559,8 +714,26 @@
           f => f.includes(edge[0]) && f.includes(edge[1])
         );
       }
+      
+      function multi(vec) {
+        const [x, y, z] = vec;
+        const M = doeAffined();
+        const v = new THREE.Vector3(x, y, z);
+        v.applyMatrix4(M);
+        return [v.x, v.y, v.z];
+        // (XYZ -> VEF)坐标系转换过后的坐标
+      }
 
-      return makeRotator(source, vertex, edge, face);
+      let [vx, vy, vz] = multi(vecToElement(source, vertex));
+      let [ex, ey, ez] = multi(vecToElement(source, edge));
+      let [fx, fy, fz] = multi(vecToElement(source, face));
+
+      return new THREE.Matrix4().set(
+        vx, ex, fx, 0,
+        vy, ey, fy, 0,
+        vz, ez, fz, 0,
+         0,  0,  0, 1,
+      );
     }
 
     // 120Cell胞方向第4层, 特异的旋转
@@ -568,7 +741,7 @@
       const {
         vList, eList, fList,
       } = source;
-      let [x, y, z] = getAverage(source, eList[id]);
+      let [x, y, z] = vecToElement(source, eList[id]);
       let r2 = x*x + y*y + z*z;
       let r = Math.sqrt(r2);
 
@@ -581,16 +754,6 @@
     }
 
     // ---- 3. 平移(Translator)矩阵生成函数 ----
-    function makeTranslator(vec) {
-      let [x, y, z] = vec;
-      return new THREE.Matrix4().set(
-        1, 0, 0, x,
-        0, 1, 0, y,
-        0, 0, 1, z,
-        0, 0, 0, 1,
-      );
-    }
-
     function Translator(mode='identity', source=[,,], id=0, k=1) {
       const {
         vList, eList, fList,
@@ -601,20 +764,25 @@
         [x, y, z] = [0, 0, 0];
       }
       else if (mode === 'face') {
-        [x, y, z] = getAverage(source, fList[id]);
+        [x, y, z] = vecToElement(source, fList[id]);
       }
       else if (mode === 'edge') {
-        [x, y, z] = getAverage(source, eList[id]);
+        [x, y, z] = vecToElement(source, eList[id]);
       }
       else if (mode === 'vertex') {
         [x, y, z] = vList[id];
       }
-
-      return makeTranslator([k*x, k*y, k*z]);
+      
+      return new THREE.Matrix4().set(
+        1, 0, 0, k*x,
+        0, 1, 0, k*y,
+        0, 0, 1, k*z,
+        0, 0, 0, 1,
+      );
     }
 
     // ============================================================
-    // 7. 核心函数：变换几何体 + 渲染副本
+    // b.4. 核心函数：变换几何体 + 渲染副本
     // ============================================================
 
     // 共轭矩阵
@@ -631,9 +799,28 @@
         .multiply(rotinv)
         .multiply(aff);
     }
+    
 
     const spawnedGroups = [];
 
+    // 生成顶点
+    function showPoints(vertices, vertexColor) {
+      const sphereGeo = new THREE.SphereGeometry(0.08, 8, 6);
+      const sphereMat = new THREE.MeshBasicMaterial({
+        color: vertexColor
+      });
+      const inst = new THREE.InstancedMesh(sphereGeo, sphereMat, vertices.length);
+
+      const matrix = new THREE.Matrix4();
+      vertices.forEach((v, i) => {
+        matrix.setPosition(...v);
+        inst.setMatrixAt(i, matrix);
+      });
+      scene.add(inst);
+    }
+
+    
+    // 生成几何体连线
     function makeShapeTransformed(source, scaler, rotator, translator, opts = {}) {
       const {
         vList, eList, fList,
@@ -643,7 +830,7 @@
         colormode,
         colours = [WHITE, WHITE, WHITE], // colormode === 0时传面、棱、点的颜色, colormode === 1时传每个面的颜色数组
         showEdges = true,
-        showVertice = true,
+        showVertices = true,
         name = 'unnamed',
       } = opts;
       let faceColor, edgeColor, vertexColor;
@@ -654,7 +841,7 @@
       }
       
       const transformer = translator.clone().multiply(conjugater(scaler, rotator))
-      const newVertice = vList.map(v => {
+      const newVertices = vList.map(v => {
         const p = new THREE.Vector3(v[0], v[1], v[2]);
         p.applyMatrix4(transformer);
         return [p.x, p.y, p.z];
@@ -664,10 +851,10 @@
       group.name = name;
       
       // 渲染顶点
-      if (showVertice) {
+      if (showVertices) {
         const pg = new THREE.BufferGeometry();
-        const arr = new Float32Array(newVertice.length * 3);
-        newVertice.forEach((v, i) => {
+        const arr = new Float32Array(newVertices.length * 3);
+        newVertices.forEach((v, i) => {
           arr[i*3] = v[0]; arr[i*3+1] = v[1]; arr[i*3+2] = v[2];
         });
         pg.setAttribute('position', new THREE.BufferAttribute(arr, 3));
@@ -685,8 +872,8 @@
         const R = 0.02;
 
         for (const [i, j] of eList) {
-          const a = new THREE.Vector3(...newVertice[i]);
-          const b = new THREE.Vector3(...newVertice[j]);
+          const a = new THREE.Vector3(...newVertices[i]);
+          const b = new THREE.Vector3(...newVertices[j]);
           const dir = new THREE.Vector3().subVectors(b, a);
           const len = dir.length();
           const cyl = new THREE.Mesh(
@@ -709,24 +896,24 @@
         }
 
         const fpos = [], fnrm = [];
-        const p0 = new THREE.Vector3(...newVertice[f[0]]);
-        const p1 = new THREE.Vector3(...newVertice[f[1]]);
-        const p2 = new THREE.Vector3(...newVertice[f[2]]);
+        const p0 = new THREE.Vector3(...newVertices[f[0]]);
+        const p1 = new THREE.Vector3(...newVertices[f[1]]);
+        const p2 = new THREE.Vector3(...newVertices[f[2]]);
         const n = new THREE.Vector3()
           .subVectors(p1, p0)
           .cross(new THREE.Vector3().subVectors(p2, p0)).normalize();
 
         const center = new THREE.Vector3(
-          f.reduce((s, i) => s + newVertice[i][0], 0) / f.length,
-          f.reduce((s, i) => s + newVertice[i][1], 0) / f.length,
-          f.reduce((s, i) => s + newVertice[i][2], 0) / f.length,
+          f.reduce((s, i) => s + newVertices[i][0], 0) / f.length,
+          f.reduce((s, i) => s + newVertices[i][1], 0) / f.length,
+          f.reduce((s, i) => s + newVertices[i][2], 0) / f.length,
         );
         if (n.dot(center) < 0) n.negate();
 
         for (let k = 1; k < f.length - 1; k++) {
-          const a = new THREE.Vector3(...newVertice[f[0]]);
-          const b = new THREE.Vector3(...newVertice[f[k]]);
-          const c = new THREE.Vector3(...newVertice[f[k + 1]]);
+          const a = new THREE.Vector3(...newVertices[f[0]]);
+          const b = new THREE.Vector3(...newVertices[f[k]]);
+          const c = new THREE.Vector3(...newVertices[f[k + 1]]);
           const cross = new THREE.Vector3()
             .subVectors(b, a)
             .cross(new THREE.Vector3().subVectors(c, a));
@@ -753,11 +940,11 @@
 
       scene.add(group);
       spawnedGroups.push(group);
-      return { vList: newVertice, eList, fList, group };
+      return { vList: newVertices, eList, fList, group };
     }
 
     // ============================================================
-    // 8. 基础几何体
+    // b.5. 基础几何体
     // ============================================================
 
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
@@ -783,7 +970,7 @@
           colormode: colormode,
           colours: colours,
           showEdges: 1,
-          showVertice: 0,
+          showVertices: 0,
           name: name,
         },
       );
@@ -876,6 +1063,11 @@
     /*const spawnmode = [
       {colour: YELLOW_1, colour2: YELLOW_1_}
     ]*/
+
+    // ============================================================
+    // b.6. 展示几何体对象
+    // ============================================================
+
     const startList = [
       [4, 10], [4, 11], [4, 12], [4, 13], [4, 14],
       [4, 15], [4, 16], [4, 17], [4, 18], [4, 19],
@@ -901,36 +1093,109 @@
     
     const Doe = { vList: vertexList, eList: edgeList, fList: faceList };
     
+    // 建造过程
     async function main() {
       for (const [k, i] of startList) {
         makeDoe(k, Doe, i);
       }
       
-      await sleep(2000);
+      await sleep(5000);
       
       for (const [k, i] of showList) {
         if(k !== 0) {
-          await sleep(100);
+          await sleep(200);
         }
         makeDoe(k, Doe, i);
         if(k !== 0) {
-          await sleep(100);
+          await sleep(200);
         }
       }
     }
+    // 删除过程
     async function rewind() {
-      await sleep(100);
+      await sleep(2000);
       
       for (const [k, i] of [...showList].reverse()) {
         if(k !== 0) {
-          await sleep(100);
+          await sleep(200);
         }
         deletes(colorName[k] + i);
         if(k !== 0) {
-          await sleep(100);
+          await sleep(200);
         }
       }
     }
+
+    // ============================================================
+    // b.7. 相机绕轴旋转
+    // ============================================================
+
+    const face = vecToElement(Doe, Doe.fList[0]);
+    const edge = vecToElement(Doe, Doe.fList[0].slice(0, 2));
+    const cameraPosition = getAverage([...Array(3).fill(face), edge]).map(i => i*10);
+    const cameraUp = face;
+
+    function cameraSet() {
+      const [x, y, z] = cameraPosition;
+      const [i, j, k] = cameraUp;
+      camera.position.set(x, y, z);
+      camera.up.set(i, j, k);
+      
+      controls.target.set(0, 0, 0);
+      controls.update();
+    }
+    
+    cameraSet();
+
+    // 定义旋转轴v
+    const vRotator = new THREE.Vector3(...face).normalize();
+    // 定义初始位置
+    const P0 = new THREE.Vector3(...cameraPosition);
+    // 分解P为径向(parallel)与法向(perpendicular, perp)
+    const P_parallel = vRotator.clone().multiplyScalar(P0.dot(vRotator));
+    const P_perp0 = P0.clone().sub(P_parallel);
+
+    const PERIOD = 19600; // 转一圈的毫秒数
+    let angle = 0;
+    let lastTime = performance.now(); // 高精度计时
+
+    function updateCameraRotation(vec) {
+      if(!isRotating){
+        // 固定Y轴为屏幕上方
+        camera.up.set(0, 1, 0);
+
+        controls.enableZoom = true;
+        controls.enableRotate = true;
+        controls.enablePan = true;
+        controls.enabled = true;
+        lastTime = performance.now();
+        return;
+      }
+
+      const now = performance.now();
+      const dt = (now - lastTime);
+      lastTime = now;
+      
+      angle -= (2 * Math.PI / PERIOD) * dt;
+      const P_perp = P_perp0.clone().applyAxisAngle(vec, angle);
+      
+      // 新的位置: v的径向 + 旋转后v的法向
+      camera.position.copy(P_parallel).add(P_perp);
+      // 画面总以旋转轴v朝上，以原点为中心
+      camera.up.copy(vec);
+      camera.lookAt(controls.target);
+
+      // 锁死滚轮
+      camera.zoom = 1;
+      camera.updateProjectionMatrix();
+      // 手势禁用
+      controls.enableZoom = false;
+      controls.enableRotate = false;
+      controls.enablePan = false;
+      controls.enabled = false;
+    }
+    
+    showPoints([[0, 100, 100]], WHITE) // ???
     async function act() {
       while (true) {
         await main();
@@ -939,10 +1204,10 @@
         await sleep(500);
       }
     }
-    act()
-    
+    act();
+
     // ============================================================
-    // 9. 灯光
+    // c.1. 灯光
     // ============================================================
     scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
@@ -962,96 +1227,73 @@
     scene.add(rim);
 
     // ============================================================
-    // 10. OrbitControls
+    // c.2. 运行过程录制
     // ============================================================
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.target.set(0, 0, 0);
-    controls.mouseButtons = {
-      LEFT:   THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT:  THREE.MOUSE.PAN,
-    };
 
-    // ============================================================
-    // 11. 中键单击 → 平滑聚焦
-    // ============================================================
-    const raycaster = new THREE.Raycaster();
-    const mouseNDC = new THREE.Vector2();
+    let mediaRecorder = null;
+    let recordedChunks = [];
 
-    renderer.domElement.addEventListener('mousedown', (e) => {
-      if (e.button === 1) e.preventDefault();
-    });
-    renderer.domElement.addEventListener('auxclick', (e) => {
-      if (e.button === 1) e.preventDefault();
-    });
-
-    let animating = false;
-    let animStartTarget, animEndTarget, animStartPos, animEndPos;
-    let animT = 0;
-    const ANIM_DURATION = 18;
-
-    function startFocus(hitPoint) {
-      const offset = hitPoint.clone().sub(controls.target);
-      animStartTarget = controls.target.clone();
-      animEndTarget   = controls.target.clone().add(offset);
-      animStartPos    = camera.position.clone();
-      animEndPos      = camera.position.clone().add(offset);
-      animT = 0;
-      animating = true;
-    }
-
-    function updateFocusAnimation() {
-      if (!animating) return;
-      animT++;
-      const k = Math.min(animT / ANIM_DURATION, 1);
-      const ease = 1 - Math.pow(1 - k, 3);
-      controls.target.lerpVectors(animStartTarget, animEndTarget, ease);
-      camera.position.lerpVectors(animStartPos, animEndPos, ease);
-      controls.update();
-      if (k >= 1) animating = false;
-    }
-
-    renderer.domElement.addEventListener('pointerdown', (e) => {
-      if (e.button !== 1) return;
-      const rect = renderer.domElement.getBoundingClientRect();
-      mouseNDC.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
-      mouseNDC.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
-
-      raycaster.setFromCamera(mouseNDC, camera);
-      const planeNormal = new THREE.Vector3();
-      camera.getWorldDirection(planeNormal);
-      const plane = new THREE.Plane().setFromNormalAndCoplanarPoint(
-        planeNormal, controls.target
-      );
-      const hitPoint = new THREE.Vector3();
-      if (raycaster.ray.intersectPlane(plane, hitPoint)) {
-        startFocus(hitPoint);
+    function startCapture() {
+      // 1. 检查浏览器是否支持 MP4
+      const mp4Type = 'video/mp4;codecs=avc1.42E01E'; // H.264 编码，兼容性最好
+      if (!MediaRecorder.isTypeSupported(mp4Type)) {
+        alert('当前浏览器不支持直接录制 MP4，建议使用 Chrome 117+ 或 Safari 17+');
+        return;
       }
-    });
+
+      // 2. 从 canvas 获取视频流（30fps 足够，60fps 会增加卡顿）
+      const stream = renderer.domElement.captureStream(30);
+
+      // 3. 创建录制器
+      mediaRecorder = new MediaRecorder(stream, {
+        mimeType: mp4Type,
+        videoBitsPerSecond: 6_000_000, // 6 Mbps，画质不错且文件大小适中
+      });
+
+      recordedChunks = [];
+      mediaRecorder.ondataavailable = (e) => {
+        if (e.data.size > 0) recordedChunks.push(e.data);
+      };
+
+      // 4. 停止时自动下载
+      mediaRecorder.onstop = () => {
+        const blob = new Blob(recordedChunks, { type: 'video/mp4' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `120cell-${Date.now()}.mp4`;
+        a.click();
+        URL.revokeObjectURL(url);
+      };
+
+      mediaRecorder.start(1000); // 每秒收集一次数据，防止内存爆掉
+      console.log('开始录制 MP4');
+    }
+
+    function stopCapture() {
+      if (mediaRecorder && mediaRecorder.state === 'recording') {
+        mediaRecorder.stop();
+        console.log('录制完成，已下载 MP4');
+      }
+    }
+
+    // 按钮事件绑定
+    document.getElementById('btn-start').addEventListener('click', startCapture);
+    document.getElementById('btn-stop').addEventListener('click', stopCapture);
 
     // ============================================================
-    // 12. 窗口自适应
-    // ============================================================
-    window.addEventListener('resize', () => {
-      aspect = window.innerWidth / window.innerHeight;
-      camera.left   = -frustum * aspect;
-      camera.right  =  frustum * aspect;
-      camera.top    =  frustum;
-      camera.bottom = -frustum;
-      camera.updateProjectionMatrix();
-      renderer.setSize(window.innerWidth, window.innerHeight);
-      labelRenderer.setSize(window.innerWidth, window.innerHeight);
-    });
-
-    // ============================================================
-    // 13. 动画循环
+    // c.3. 动画循环
     // ============================================================
     function animate() {
       requestAnimationFrame(animate);
+      
+      updateCameraRotation(vRotator); // 相机旋转
       updateFocusAnimation();
-      controls.update();
+      updateHint();
+
+      if(!isRotating) {
+        controls.update();
+      }
       renderer.render(scene, camera);
       labelRenderer.render(scene, camera);
     }
