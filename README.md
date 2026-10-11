@@ -36,8 +36,8 @@ Hand-derived ***math*** · AI-assisted ***code*** \
 - [ ] 跳转的跨页按钮
 - [ ] 其他页面美术设计
 
-致谢：
-@ 1-PT-AxH-RV-0 (网友)
+致谢：\
+**@ 1-PT-AxH-RV-0** (网友支持)\
 DeepSeek (AI辅助)
 
 项目持续更新中！ \
