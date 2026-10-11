@@ -241,7 +241,7 @@
       animating = true;
     }
 
-    let isRotating = true; // 旋转的开机按钮
+    let isRotating = false; // 旋转的开机按钮
 
     const hintEl = document.getElementById('hint');
     let hintState = null;   // 记录当前提示状态，避免每帧重建
@@ -401,16 +401,22 @@
       scene.add(makeLabel(yLabel, new THREE.Vector3(...yrAxis), 'label axis'));
       scene.add(makeLabel(zLabel, new THREE.Vector3(...zrAxis), 'label axis'));
     }
-    //makeAxis([1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
+    makeAxis([1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
     
     // ============================================================
     // b.2. 基础几何体数据
     // ============================================================
     const PHI = (1 + Math.sqrt(5)) / 2;
-    const SQ5 = Math.sqrt(5)
-    const SQ3 = Math.sqrt(3)
+    const PH2 = PHI ** 2;
+    const SQ5 = Math.sqrt(5);
 
-    const vertexList = [
+    const SQ3 = Math.sqrt(3);
+
+    const SQ2 = Math.sqrt(2);
+    const SQ8 = Math.sqrt(8);
+
+    // 正十二面体 (Dodecadedron, Doe)
+    const DoeVertexList = [
       [PHI, -1 / PHI, 0],
       [PHI, 1 / PHI, 0],
       [1, 1, 1],
@@ -436,7 +442,7 @@
       [-PHI, 1 / PHI, 0],
     ];
 
-    const edgeList = [
+    const DoeEdgeList = [
       [0, 1], [1, 2], [2, 3], [3, 4], [4, 0],
       [4, 5], [0, 6], [1, 7], [2, 8], [3, 9],
 
@@ -447,7 +453,7 @@
       [19, 15], [15, 16], [16, 17], [17, 18], [18, 19],
     ];
 
-    const faceList = [
+    const DoeFaceList = [
       [0, 1, 2, 3, 4],
 
       [4, 0, 6, 11, 5],
@@ -465,7 +471,7 @@
       [15, 16, 17, 18, 19],
     ];
     
-    const PH2 = PHI ** 2;
+    // 大星形十二面体 (Gissid)
     const GissidAddvertexList = [
       [1 / PHI, 0, 1 / PH2],
 
@@ -533,23 +539,49 @@
 
       [10, 26, 27], [11, 27, 28], [12, 28, 29], [13, 29, 30], [14, 30, 26],
     ];
-    const g = GREEN_G, b = BLUE_G, w = WHITE_G, p = PURPLE_G, y = YELLOW_G, pk = PINK_G;
+    const gG = GREEN_G,
+      bG = BLUE_G,
+      wG = WHITE_G,
+      pG = PURPLE_G,
+      yG = YELLOW_G,
+      pkG = PINK_G;
     const GissidFaceColor = [
-      g, g, g, g, g,
+      gG, gG, gG, gG, gG,
 
-      b, b, b, b, b,
-      pk, pk, pk, pk, pk,
-      w, w, w, w, w,
-      p, p, p, p, p,
-      y, y, y, y, y,
+      bG, bG, bG, bG, bG,
+      pkG, pkG, pkG, pkG, pkG,
+      wG, wG, wG, wG, wG,
+      pG, pG, pG, pG, pG,
+      yG, yG, yG, yG, yG,
 
-      y, y, y, y, y,
-      p, p, p, p, p,
-      w, w, w, w, w,
-      pk, pk, pk, pk, pk,
-      b, b, b, b, b,
+      yG, yG, yG, yG, yG,
+      pG, pG, pG, pG, pG,
+      wG, wG, wG, wG, wG,
+      pkG, pkG, pkG, pkG, pkG,
+      bG, bG, bG, bG, bG,
 
-      g, g, g, g, g,
+      gG, gG, gG, gG, gG,
+    ];
+
+    // 正四面体 (Tetrahedron, Tet)
+    const TetVertexList = [
+      [PHI / SQ8, PHI / 2, 0],
+      [PHI / SQ8, -PHI / 2, 0],
+      [-PHI / SQ8, 0, PHI / 2],
+      [-PHI / SQ8, 0, -PHI / 2],
+    ];
+
+    const TetEdgeList = [
+      [0, 1],
+      [0, 2], [0, 3], [1, 2], [1, 3],
+      [2, 3],
+    ];
+
+    const TetFaceList = [
+      [0, 1, 2],
+      [0, 1, 3],
+      [0, 2, 3],
+      [1, 2, 3],
     ];
 
     // ============================================================
@@ -566,8 +598,25 @@
       -----
     */
 
-    // ---- 1. 缩放(Scaler)矩阵生成函数 ----
-    function Scaler(mode='identity', k=1, m=5, n=3) {
+    // ---- 1. 缩放(Scalar)矩阵生成函数 ----
+    function Scalar(aSource=[,,], mode='identity', k=1) {
+      // 短路式 返回值
+      if (mode === 'identity') {
+        return new THREE.Matrix4().set(
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1,
+        );
+      }
+
+      // 由source的信息 算出 对称群 {m, n}
+      const [vList, eList, fList] = aSource;
+      const vertexNum = vList.length;
+      const faceNum = fList.length;
+      const m = fList[0].length;
+      const n = faceNum * m / vertexNum;
+
       const am = Math.PI / m, an = Math.PI / n;
       // 棱面心角
       const cos_theta_EF = Math.cos(an) / Math.sin(am);
@@ -579,15 +628,7 @@
       const cos_theta_VE = Math.cos(am) / Math.sin(an);
       const c = cos_theta_VE ** 2;
       
-      if (mode === 'identity') {
-        return new THREE.Matrix4().set(
-          1, 0, 0, 0,
-          0, 1, 0, 0,
-          0, 0, 1, 0,
-          0, 0, 0, 1,
-        );
-      }
-      else if (mode === 'face') {
+      if (mode === 'face') {
         return new THREE.Matrix4().set(
           1, 0, k-1, 0,
           0, 1, k-1, 0,
@@ -612,17 +653,17 @@
         ).transpose();
       }
       else if (mode === 'triconvergency') {
-        const alpha = Math.atan(PHI / SQ3);
+        const alpha = Math.asin(PHI / SQ3);
         const theta_VE = Math.acos(cos_theta_VE);
         const s = Math.sqrt(1 - k**2) / Math.tan(alpha) / Math.tan(theta_VE);
         
         return new THREE.Matrix4().set(
-          -s+k,  -s,-s*a, 0,
+           -s+k,  -s,-s*a, 0,
           1+s-k, 1+s, s*a, 0,
               0,   0,   1, 0,
               0,   0,   0, 1,
         )
-        .multiply(Scaler('edge', Math.sin(alpha)));
+        .multiply(Scalar(Doe, 'edge', Math.sin(alpha)));
       }
       else if (mode === 'biconvergency') {
         const alpha = 72 * Math.PI / 180;
@@ -634,58 +675,43 @@
         const s = -Math.sqrt(1 - k**2) / Math.tan(alpha) / Math.tan(theta_VF);
         
         return new THREE.Matrix4().set(
-          -s+k, -s+(k-1)*d,  -s, 0,
+           -s+k, -s+(k-1)*d,  -s, 0,
               0,     1,        0, 0,
           1+s-k,  s-(k-1)*d, 1+s, 0,
               0,     0,        0, 1,
         )
-        .multiply(Scaler('face', Math.sin(alpha)));
+        .multiply(Scalar(Doe, 'face', Math.sin(alpha)));
       }
     }
 
-    // 正交(VEF)与直角(XYZ)坐标系的转换矩阵
-    function doeAffined() {
-      return new THREE.Matrix4().set(
-        0,-PH2,    0, 0,
-        1, PH2, -PHI, 0,
-        0,   0,  SQ5, 0,
-        0,   0,    0, 1,
-      );
-    }
-
-    // 向量平均值
+    // 向量平均值, 回复Vector3
     function getAverage(vecList) {
-      let res = [0, 0, 0];
+      let res = new THREE.Vector3(0, 0, 0);
       let cnt = 0;
       for (const v of vecList) {
-        const [i, j, k] = res;
-        const [x, y, z] = v;
-        res = [
-          (i * cnt + x) / (cnt + 1),
-          (j * cnt + y) / (cnt + 1),
-          (k * cnt + z) / (cnt + 1),
-        ] ;
+        const [x, y, z] = v; // 这个定义 可以加入上面这一行
+        let vec = new THREE.Vector3(x, y, z);
+
+        res = res.clone().multiplyScalar(cnt)
+          .add(vec)
+          .divideScalar(cnt + 1);
+        
         cnt++;
       }
       return res;
     }
 
+    // 由编号数组 得到 平均向量, 回复Vector3
     function vecToElement(source, sets) {
-      const {
-        vList, eList, fList,
-      } = source;
+      const [vList, eList, fList] = source;
       return getAverage(sets.map(i => vList[i]));
     }
 
     // ---- 2. 旋转(Rotator)矩阵生成函数 ----
-    function Rotator(mode='identity', source=[,,], id=0) {
+    function Rotator(aSource=[,,], bSource=[,,], aMode=['identity'], bMode=[,], id=0) {
       // source是顶点集、棱集和面集的集合，决定了旋转的对称群
-      const {
-        vList, eList, fList,
-      } = source;
 
-      let face, edge, vertex;
-      if (mode === 'identity') {
+      if (aMode[0] === 'identity') {
         return new THREE.Matrix4().set(
           1, 0, 0, 0,
           0, 1, 0, 0,
@@ -693,90 +719,204 @@
           0, 0, 0, 1,
         );
       }
-      else if (mode === 'face') {
-        face = fList[id];
-        edge = face.slice(0, 2);
-        vertex = face.slice(0, 1);
-      }
-      else if (mode === 'edge') {
-        edge = eList[id];
-        vertex = edge.slice(0, 1);
-        face = fList.find(
-          f => f.includes(edge[0]) && f.includes(edge[1])
-        );
-      }
-      else if (mode === 'vertex') {
-        vertex = [id];
-        edge = eList.find(
-          e => e.includes(vertex[0])
-        );
-        face = fList.find(
-          f => f.includes(edge[0]) && f.includes(edge[1])
-        );
-      }
-      
-      function multi(vec) {
-        const [x, y, z] = vec;
-        const M = doeAffined();
-        const v = new THREE.Vector3(x, y, z);
-        v.applyMatrix4(M);
-        return [v.x, v.y, v.z];
-        // (XYZ -> VEF)坐标系转换过后的坐标
-      }
 
-      let [vx, vy, vz] = multi(vecToElement(source, vertex));
-      let [ex, ey, ez] = multi(vecToElement(source, edge));
-      let [fx, fy, fz] = multi(vecToElement(source, face));
+      /** ------ **/
+      // 由模板和mode名称 生成 对齐向量
+      function getModeVector(source, modes, Id) {
+        const [vList, eList, fList] = source;
 
-      return new THREE.Matrix4().set(
-        vx, ex, fx, 0,
-        vy, ey, fy, 0,
-        vz, ez, fz, 0,
-         0,  0,  0, 1,
+        let mode, mode2 = undefined;
+        if (modes.length === 1) {
+          [mode] = modes;
+        }
+        else if (modes.length === 2) {
+          [mode, mode2] = modes;
+        }
+
+        if (mode === 'face') {
+          let face = fList[Id];
+          let edge = face.slice(0, 2);
+          let vertex = edge.slice(0, 1);
+
+          face   = vecToElement(source, face);
+          edge   = vecToElement(source, edge);
+          vertex = vecToElement(source, vertex);
+
+          if (mode2 === undefined) {
+            return [face, edge];
+          }
+          else if (mode2 === 'edge') {
+            return [face, edge];
+          }
+          else if (mode2 === 'vertex') {
+            return [face, vertex];
+          }
+        }
+        else if (mode === 'edge') {
+          let edge = eList[Id];
+          let vertex = edge.slice(0, 1);
+          let face = fList.find(
+            f => f.includes(edge[0]) && f.includes(edge[1])
+          );
+
+          edge   = vecToElement(source, edge);
+          vertex = vecToElement(source, vertex);
+          face   = vecToElement(source, face);
+
+          if (mode2 === undefined) {
+            return [edge, vertex];
+          }
+          else if (mode2 === 'vertex') {
+            return [edge, vertex];
+          }
+          else if (mode2 === 'face') {
+            return [edge, face];
+          }
+        }
+        else if (mode === 'vertex') {
+          let vertex = [Id];
+          let edge = eList.find( e => e.includes(vertex[0]) );
+          let face = fList.find(
+            f => f.includes(edge[0]) && f.includes(edge[1])
+          );
+
+          vertex = vecToElement(source, vertex);
+          edge   = vecToElement(source, edge);
+          face   = vecToElement(source, face);
+          
+          if (mode2 === undefined) {
+            return [vertex, face];
+          }
+          else if (mode2 === 'edge') {
+            return [vertex, edge];
+          }
+          else if (mode2 === 'face') {
+            return [vertex, face];
+          }
+        }
+        else if (mode === 'triconvergency') {
+          let edge = eList[Id];
+          let vertex = edge.slice(0, 1);
+          let face = fList.find(
+            f => f.includes(edge[0]) && f.includes(edge[1])
+          );
+          
+          edge   = vecToElement(source, edge);
+          vertex = vecToElement(source, vertex);
+          face   = vecToElement(source, face);
+          vertex.sub(edge);
+
+          if (mode2 === undefined) {
+            return [vertex, edge];
+          }
+        }
+        else if (mode === 'biconvergency') {
+          let vertex = [Id];
+          let edge = eList.find( e => e.includes(vertex[0]) );
+          let face = fList.find(
+            f => f.includes(edge[0]) && f.includes(edge[1])
+          );
+
+          vertex = vecToElement(source, vertex);
+          edge   = vecToElement(source, edge);
+          face   = vecToElement(source, face);
+          vertex.sub(face);
+
+          if (mode2 === undefined) {
+            return [vertex, face];
+          }
+        }
+      }
+      /** ------ **/
+
+      // 方向向量(r, u) 归一化
+      let [arv, auv] = getModeVector(aSource, aMode, 0);
+      arv.normalize();
+      auv.normalize();
+
+      let [brv, buv] = getModeVector(bSource, bMode, id);
+      brv.normalize();
+      buv.normalize();
+
+      // u => (r × u) × r, 垂直化
+      let res = arv.clone().cross(auv).cross(arv).normalize();
+      auv = res;
+      res = brv.clone().cross(buv).cross(brv).normalize();
+      buv = res;
+
+      // t := r × u
+      let atv = arv.clone().cross(auv).normalize();
+      let btv = brv.clone().cross(buv).normalize();
+
+      // 三条单位垂直坐标轴 包装为 矩阵
+
+      // 对齐系 矩阵
+      const aAxis = new THREE.Matrix4().set(
+        arv.x, auv.x, atv.x, 0,
+        arv.y, auv.y, atv.y, 0,
+        arv.z, auv.z, atv.z, 0,
+        0,     0,     0,     1,
       );
-    }
+      // 目标系 矩阵
+      const bAxis = new THREE.Matrix4().set(
+        brv.x, buv.x, btv.x, 0,
+        brv.y, buv.y, btv.y, 0,
+        brv.z, buv.z, btv.z, 0,
+        0,     0,     0,     1,
+      )
 
-    // 120Cell胞方向第4层, 特异的旋转
-    function edgeRotatorSpecially(source, id) {
-      const {
-        vList, eList, fList,
-      } = source;
-      let [x, y, z] = vecToElement(source, eList[id]);
-      let r2 = x*x + y*y + z*z;
-      let r = Math.sqrt(r2);
-
-      return new THREE.Matrix4().set(
-        x*x/r2,       x*y/r2 - z/r, x*z/r2 + y/r, 0,
-        x*y/r2 + z/r, y*y/r2,       y*z/r2 - x/r, 0,
-        x*z/r2 - y/r, y*z/r2 + x/r, z*z/r2,       0,
-        0, 0, 0, 1,
-      );
+      // B × A⁻¹ 得到 旋转矩阵
+      return bAxis.clone().multiply(aAxis.clone().invert());
     }
 
     // ---- 3. 平移(Translator)矩阵生成函数 ----
-    function Translator(mode='identity', source=[,,], id=0, k=1) {
-      const {
-        vList, eList, fList,
-      } = source;
-
-      let x, y, z;
-      if (mode === 'identity') {
-        [x, y, z] = [0, 0, 0];
-      }
-      else if (mode === 'face') {
-        [x, y, z] = vecToElement(source, fList[id]);
-      }
-      else if (mode === 'edge') {
-        [x, y, z] = vecToElement(source, eList[id]);
-      }
-      else if (mode === 'vertex') {
-        [x, y, z] = vList[id];
+    function Translator(aSource=[,,], bSource=[,,], aMode='', bMode='identity', id=0, k=1) {
+      // aSource: 形状对称群, bSource: 方向对称群
+      
+      if(bMode === 'identity') {
+        return new THREE.Matrix4().set(
+          1, 0, 0, 0,
+          0, 1, 0, 0,
+          0, 0, 1, 0,
+          0, 0, 0, 1,
+        );
       }
       
+      const [aVList, aEList, aFList] = aSource;
+      const [bVList, bEList, bFList] = bSource;
+
+      let aVec = new THREE.Vector3(0, 0, 0), bVec = new THREE.Vector3(0, 0, 0);
+
+      {
+        if (aMode === 'face') {
+          aVec = vecToElement(aSource, aFList[0]);
+        }
+        else if (aMode === 'edge') {
+          aVec = vecToElement(aSource, aEList[0]);
+        }
+        else if (aMode === 'vertex') {
+          aVec = vecToElement(aSource, [0]);
+        }
+      }
+      {
+        if (bMode === 'face') {
+          bVec = vecToElement(bSource, bFList[id]);
+        }
+        else if (bMode === 'edge') {
+          bVec = vecToElement(bSource, bEList[id]);
+        }
+        else if (bMode === 'vertex') {
+          bVec = vecToElement(bSource, [id]);
+        }
+      }
+      
+      // vec, 方向是bVec, 长度是k * aVec
+      const vec = bVec.clone().normalize().multiplyScalar(aVec.length() * k);
+
       return new THREE.Matrix4().set(
-        1, 0, 0, k*x,
-        0, 1, 0, k*y,
-        0, 0, 1, k*z,
+        1, 0, 0, vec.x,
+        0, 1, 0, vec.y,
+        0, 0, 1, vec.z,
         0, 0, 0, 1,
       );
     }
@@ -784,26 +924,9 @@
     // ============================================================
     // b.4. 核心函数：变换几何体 + 渲染副本
     // ============================================================
-
-    // 共轭矩阵
-    function conjugater(scaler, rotater) {
-      const aff  = doeAffined().clone();
-      const rot  = rotater.clone();
-      const self = scaler.clone();
-      const rotinv = rot.clone().invert();
-      const affinv = aff.clone().invert();
-      
-      return affinv
-        .multiply(rot)
-        .multiply(self)
-        .multiply(rotinv)
-        .multiply(aff);
-    }
-    
-
     const spawnedGroups = [];
 
-    // 生成顶点
+    // 生成顶点 (?)
     function showPoints(vertices, vertexColor) {
       const sphereGeo = new THREE.SphereGeometry(0.08, 8, 6);
       const sphereMat = new THREE.MeshBasicMaterial({
@@ -818,13 +941,10 @@
       });
       scene.add(inst);
     }
-
     
     // 生成几何体连线
-    function makeShapeTransformed(source, scaler, rotator, translator, opts = {}) {
-      const {
-        vList, eList, fList,
-      } = source;
+    function makeShapeTransformed(source, scalar, rotator, translator, opts = {}) {
+      const [vList, eList, fList] = source;
 
       const {
         colormode,
@@ -840,7 +960,25 @@
         faceColor = colours;
       }
       
-      const transformer = translator.clone().multiply(conjugater(scaler, rotator))
+      // DeepSeek记得提醒我这个要替换掉
+      function doeAffined() {
+        return new THREE.Matrix4().set(
+          0,-PH2,    0, 0,
+          1, PH2, -PHI, 0,
+          0,   0,  SQ5, 0,
+          0,   0,    0, 1,
+        );
+      }
+      const aff = doeAffined().clone(); // 坐标系 转换矩阵
+      const affinv = aff.clone().invert();
+
+      // A = T R D-1 S D
+      const transformer = translator.clone()
+        .multiply(rotator)
+        .multiply(affinv)
+        .multiply(scalar)
+        .multiply(aff);
+
       const newVertices = vList.map(v => {
         const p = new THREE.Vector3(v[0], v[1], v[2]);
         p.applyMatrix4(transformer);
@@ -950,7 +1088,7 @@
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     
     // 增加展示对象
-    function adds(source, scaler, rotator, translator, colormode, colortype, name) {
+    function adds(source, scalar, rotator, translator, colormode, colortype, name) {
       /*
         colormode === 0: 常值颜色, colortype输入面、棱颜色
         colormode === 1: 自定义颜色, colortype输入所有面的颜色定义数组
@@ -965,7 +1103,7 @@
 
       return makeShapeTransformed(
         source,
-        scaler, rotator, translator,
+        scalar, rotator, translator,
         {
           colormode: colormode,
           colours: colours,
@@ -991,55 +1129,6 @@
         });
       }
       return 0;
-    }
-
-    const modes = ['identity', 'face', 'vertex', 'face', 'edge'];
-    const colours = [
-      {colour: YELLOW_1, colour2: YELLOW_1_},
-      {colour: GREEN_1_, colour2: GREEN_1__},
-      {colour: BLUE_1,   colour2: BLUE_1   },
-      {colour: PURPLE_1, colour2: PURPLE_1_},
-      {colour: WHITE,    colour2: WHITE    },
-    ];
-    const colorName = ['yellow', 'green', 'blue', 'purple', 'white'];
-
-    const scalesNum = [
-      1,
-      -PHI / 2,
-      -1 / 2,
-      1 / PHI / 2,
-      0,
-    ];
-    const radiusNum = [
-      0,
-      SQ5 * PHI / 2,
-      (PHI ** 3) / 2,
-      SQ5 * (PHI ** 2) / 2,
-      PHI ** 2 + 0.001,
-    ];
-
-    function makeDoe(layer, source, id) {
-      const mode = modes[layer], colour = colours[layer], colorname = colorName[layer];
-      const scalesnum = scalesNum[layer], radiusnum = radiusNum[layer];
-      
-      const scale = Scaler(mode, scalesnum);
-      const rotate = Rotator(mode, source, id);
-      let translate = Translator(mode, source, id, radiusnum);
-
-      // 120Cell胞方向第4层, 特异的旋转
-      if (layer === 4) {
-        translate = edgeRotatorSpecially(source, id).multiply(translate);
-      }
-      
-      return adds(
-        source,
-        scale,
-        rotate,
-        translate,
-        0,
-        colour,
-        colorname + id,
-      );
     }
 
     /*
@@ -1083,6 +1172,7 @@
       [1, 7],  [1, 8],  [1, 9],  [1, 10], [1, 6],
       [2, 6],  [2, 5],  [2, 9],  [2, 8],  [2, 7],
       [0, 0],
+      
       [1, 1],  [1, 2],  [1, 5],  [1, 4],  [1, 3],
       [3, 3],  [3, 2],  [3, 1],  [3, 5],  [3, 4],
       [1, 0],
@@ -1090,67 +1180,278 @@
       [3, 0],
     ];
 
-    
-    const Doe = { vList: vertexList, eList: edgeList, fList: faceList };
-    
+    const Doe = [DoeVertexList, DoeEdgeList, DoeFaceList];
+
+    // 新建 Doe (261010 重构)
+    function makeDoe(layer, id) {
+      let scale, rotate, translate;
+
+      if (layer === 0) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(),
+          Rotator(),
+          Translator(),
+          {
+            colormode: 0,
+            colours: [YELLOW_1, YELLOW_1_, YELLOW_1],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'yellow' + id,
+          },
+        );
+      }
+      else if (layer === 1) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'face', PHI / 2),
+          Rotator(Doe, Doe, ['face'], ['face', 'vertex'], id),
+          Translator(Doe, Doe, 'face', 'face', id, SQ5 * PHI / 2),
+          {
+            colormode: 0,
+            colours: [GREEN_1_, GREEN_1__, GREEN_1_],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'green' + id,
+          },
+        );
+      }
+      else if (layer === 2) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'vertex', 1 / 2),
+          Rotator(Doe, Doe, ['vertex'], ['vertex', 'edge'], id),
+          Translator(Doe, Doe, 'vertex', 'vertex', id, (PHI ** 3) / 2),
+          {
+            colormode: 0,
+            colours: [BLUE_1, BLUE_1, BLUE_1],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'blue' + id,
+          },
+        );
+      }
+      else if (layer === 3) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'face', 1 / 2 / PHI),
+          Rotator(Doe, Doe, ['face'], ['face', 'edge'], id),
+          Translator(Doe, Doe, 'face', 'face', id, SQ5 * (PHI ** 2) / 2),
+          {
+            colormode: 0,
+            colours: [PURPLE_1, PURPLE_1_, PURPLE_1],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'purple' + id,
+          },
+        );
+      }
+      else if (layer === 4) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'edge', 0),
+          Rotator(Doe, Doe, ['edge'], ['edge', 'face'], id),
+          Translator(Doe, Doe, 'edge', 'edge', id, PHI ** 2 + 0.001),
+          {
+            colormode: 0,
+            colours: [WHITE, WHITE, WHITE],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'white' + id,
+          },
+        );
+      }
+    }
+
     // 建造过程
-    async function main() {
+    async function main(T=200) {
       for (const [k, i] of startList) {
-        makeDoe(k, Doe, i);
+        makeDoe(k, i);
       }
       
-      await sleep(5000);
+      if (T !== 0) {
+        await sleep(25 * T);
+      }
       
       for (const [k, i] of showList) {
         if(k !== 0) {
-          await sleep(200);
+          if (T !== 0) {
+            await sleep(T);
+          }
         }
-        makeDoe(k, Doe, i);
+        makeDoe(k, i);
         if(k !== 0) {
-          await sleep(200);
+          if (T !== 0) {
+            await sleep(T);
+          }
         }
       }
     }
+    //main(0);
+
+    const colorName = ['yellow', 'green', 'blue', 'purple', 'white'];
     // 删除过程
-    async function rewind() {
-      await sleep(2000);
+    async function rewind(T=200) {
+      if (T !== 0) {
+        await sleep(10 * T);
+      }
       
       for (const [k, i] of [...showList].reverse()) {
         if(k !== 0) {
-          await sleep(200);
+          if(T !== 0) {
+            await sleep(T);
+          }
         }
         deletes(colorName[k] + i);
         if(k !== 0) {
-          await sleep(200);
+          if (T !== 0) {
+            await sleep(T);
+          }
         }
       }
     }
+
+    // 260605 试验
+   
+    const Tet = [TetVertexList, TetEdgeList, TetFaceList];
+
+    function makeTet(layer, id) {
+      let scale, rotate, translate;
+
+      if (layer === 0) {
+        makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'vertex', PH2 / SQ8),
+          Rotator(Doe, Tet, ['vertex'], ['vertex', 'face'], id),
+          Translator(Doe, Tet, 'vertex', 'vertex', id, PH2 / SQ8),
+          {
+            colormode: 0,
+            colours: [WHITE, WHITE, WHITE],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'white' + id,
+          },
+        );
+      }
+      else if (layer === 1) {
+        makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'vertex', SQ5 / SQ8),
+          Rotator(Doe, Tet, ['vertex'], ['face', 'edge'], id),
+          Translator(Doe, Tet, 'vertex', 'face', id, SQ5 * PHI / 2 * 0.87),
+          {
+            colormode: 0,
+            colours: [GREEN_1_, GREEN_1__, GREEN_1_],
+            showEdges: 1,
+            showVertices: 0,
+            name: 'green' + id,
+          },
+        );
+      }
+      else if (layer === 2) {
+        scale = Scalar(Doe, 'edge', 1 / SQ2);
+        rotate = Rotator(Doe, Tet, ['edge'], ['edge', 'face'], id);
+        translate = Translator(Doe, Tet, 'edge', 'edge', id, SQ5 * PHI / 2 * 1.1);
+        
+        return adds(
+          Doe,
+          scale,
+          rotate,
+          translate,
+          0,
+          {colour: BLUE_1, colour2: BLUE_1},
+          'blue' + id,
+        );
+      }
+      /*else if (layer === 3) {
+        scale = Scalar(Doe, 'face', 1 / 2 / PHI);
+        rotate = Rotator(Doe, Doe, ['face'], ['face', 'edge'], id);
+        translate = Translator(Doe, Doe, 'face', id, SQ5 * (PHI ** 2) / 2);
+
+        return adds(
+          Doe,
+          scale,
+          rotate,
+          translate,
+          0,
+          {colour: PURPLE_1, colour2: PURPLE_1_},
+          'purple' + id,
+        );
+      }
+      else if (layer === 4) {
+        scale = Scalar(Doe, 'edge', 0);
+        rotate = Rotator(Doe, Doe, ['edge'], ['edge', 'face'], id);
+        translate = Translator(Doe, Doe, 'edge', id, PHI ** 2 + 0.001);
+        
+        return adds(
+          Doe,
+          scale,
+          rotate,
+          translate,
+          0,
+          {colour: WHITE, colour2: WHITE},
+          'white' + id,
+        );
+      }*/
+    }
+    
+    makeTet(0, 0);
+    makeTet(0, 1);
+    makeTet(0, 2);
+    makeTet(0, 3);
+    makeTet(1, 0);
+    makeTet(1, 1);
+    makeTet(1, 2);
+    makeTet(1, 3);
+
+    makeTet(2, 0);
+    makeTet(2, 1);
+    makeTet(2, 2);
+    makeTet(2, 3);
+    makeTet(2, 4);
+    makeTet(2, 5);
+
+    // Tet
+    /*makeShapeTransformed(
+      Tet,
+      Scalar(),
+      Rotator(),
+      Translator(),
+      {
+        colormode: 0,
+        colours: [YELLOW_1, YELLOW_1_, YELLOW_1],
+        showEdges: 1,
+        showVertices: 0,
+        name: 'Tet',
+      },
+    );*/
 
     // ============================================================
     // b.7. 相机绕轴旋转
     // ============================================================
 
-    const face = vecToElement(Doe, Doe.fList[0]);
-    const edge = vecToElement(Doe, Doe.fList[0].slice(0, 2));
-    const cameraPosition = getAverage([...Array(3).fill(face), edge]).map(i => i*10);
+    const [vList, eList, fList] = Doe;
+    const face = vecToElement(Doe, fList[0]);
+    const edge = vecToElement(Doe, fList[0].slice(0, 2));
+
+    // (face * 3 + edge) / 4, 相机倍数 *10
+    const cameraPosition = face.clone()
+      .multiplyScalar(3)
+      .add(edge).divideScalar(4)
+      .multiplyScalar(10);
+    
     const cameraUp = face;
 
-    function cameraSet() {
-      const [x, y, z] = cameraPosition;
-      const [i, j, k] = cameraUp;
-      camera.position.set(x, y, z);
-      camera.up.set(i, j, k);
-      
-      controls.target.set(0, 0, 0);
-      controls.update();
-    }
+    camera.position.copy(cameraPosition);
+    camera.up.copy(cameraUp);
     
-    cameraSet();
+    controls.target.set(0, 0, 0);
+    controls.update();
 
     // 定义旋转轴v
-    const vRotator = new THREE.Vector3(...face).normalize();
+    const vRotator = face.clone().normalize();
     // 定义初始位置
-    const P0 = new THREE.Vector3(...cameraPosition);
+    const P0 = cameraPosition;
     // 分解P为径向(parallel)与法向(perpendicular, perp)
     const P_parallel = vRotator.clone().multiplyScalar(P0.dot(vRotator));
     const P_perp0 = P0.clone().sub(P_parallel);
@@ -1195,7 +1496,7 @@
       controls.enabled = false;
     }
     
-    showPoints([[0, 100, 100]], WHITE) // ???
+    //showPoints([[0, 100, 100]], WHITE) // ???
     async function act() {
       while (true) {
         await main();
@@ -1204,7 +1505,23 @@
         await sleep(500);
       }
     }
-    act();
+
+    //act();
+
+    /*
+    makeShapeTransformed(
+      Doe,
+      Scalar(),
+      Rotator(),
+      Translator(),
+      {
+        colormode: 0,
+        colours: [WHITE, WHITE, WHITE],
+        showEdges: 1,
+        showVertices: 0,
+        name: '111',
+      },
+    );*/
 
     // ============================================================
     // c.1. 灯光
