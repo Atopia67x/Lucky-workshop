@@ -1,7 +1,7 @@
 <!--
   ============================================================
   120Cell投影形状 3D引擎
-  (v0.0.4)
+  (v0.0.6)
   详细日志: 见 开发日志.md
   ============================================================
 -->
@@ -11,7 +11,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>十二面体矩阵变换 261001</title>
+  <title>120-cell 场景展示 (261001)</title>
   <style>
     * { box-sizing: border-box; }
     body {
@@ -77,11 +77,96 @@
       cursor: not-allowed;
     }
 
+    /* 顶部目录：三个状态切换 */
+    #topnav {
+      position: fixed;
+      top: 20px;
+      left: 20px;
+      z-index: 30;
+      display: flex;
+      gap: 8px;
+    }
+    #topnav button {
+      padding: 8px 14px;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 6px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: monospace;
+    }
+    #topnav button:active {
+      transform: scale(0.96);
+    }
+    #topnav button.active {
+      background: #6cf;
+      color: #111;
+      border-color: #6cf;
+    }
+
+    /* 120cell-C 的显示个数滑块 */
+    #sliderC {
+      position: fixed;
+      bottom: 64px;
+      left: 50%;
+      transform: translateX(-50%);
+      z-index: 30;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 12px;
+      background: rgba(30, 30, 30, 0.85);
+      border: 1px solid #444;
+      border-radius: 6px;
+      font-size: 12px;
+      color: #aaa;
+      backdrop-filter: blur(6px);
+    }
+    #sliderC button {
+      width: 26px;
+      height: 22px;
+      padding: 0;
+      background: #222;
+      color: #eee;
+      border: 1px solid #444;
+      border-radius: 4px;
+      cursor: pointer;
+      font-size: 13px;
+      font-family: monospace;
+      line-height: 1;
+    }
+    #sliderC button:active {
+      transform: scale(0.94);
+    }
+    #sliderC input[type="range"] {
+      width: 160px;
+    }
+    #sliderC .val {
+      min-width: 2ch;
+      color: #6cf;
+      font-family: monospace;
+    }
+
   </style>
 </head>
 <body>
 
   <div id="canvas-wrap"></div>
+
+  <div id="topnav">
+    <button id="btn-mode-c">120cell-C</button>
+    <button id="btn-mode-f">120cell-F</button>
+    <button id="btn-mode-v">120cell-V</button>
+  </div>
+
+  <div id="sliderC">
+    <span>显示个数</span>
+    <button id="btn-c-dec">-</button>
+    <input id="range-c" type="range" min="0" max="45" step="1" value="45">
+    <button id="btn-c-inc">+</button>
+    <span class="val" id="range-c-val">45</span>
+  </div>
 
   <div id="ui">
   <button id="btn-start">开始录制</button>
@@ -119,13 +204,9 @@
     const BLACK = 0x000000
 
     const YELLOW_1 = 0xe8e23a
-    const YELLOW_1_= 0xf5f07a
     const GREEN_1  = 0x8a9a5b
-    const GREEN_1_ = 0xb4c078
-    const GREEN_1__= 0xdee695
     const BLUE_1   = 0x7ec8D8
     const PURPLE_1 = 0xc9b8e0
-    const PURPLE_1_= 0xd8cdf0
 
     const GREEN_G  = 0xa8d88b
     const WHITE_G  = 0xffffff
@@ -133,12 +214,27 @@
     const BLUE_G   = 0x8bcae8
     const YELLOW_G = 0xf5e6a3
     const PINK_G   = 0xf0c8d8
-    
+
+    // 颜色变亮
+    // t: 0 不变，1 全白
+    function lightenColor(c, t = 0.3) {
+      const r = (c >> 16) & 0xff;
+      const g = (c >>  8) & 0xff;
+      const b =  c        & 0xff;
+      const k = Math.max(0, Math.min(1, t));
+      const R = Math.round(r + (255 - r) * k);
+      const G = Math.round(g + (255 - g) * k);
+      const B = Math.round(b + (255 - b) * k);
+      return (R << 16) | (G << 8) | B;
+    }
+
     // ============================================================
     // a.1. 场景
     // ============================================================
-
-    const scene = new THREE.Scene();
+    // sceneC / sceneF / sceneV 分别承载 120cell-C、120cell-F、120cell-V 三套独立内容
+    const sceneC = new THREE.Scene();
+    const sceneF = new THREE.Scene();
+    const sceneV = new THREE.Scene();
 
     // ============================================================
     // a.2. 背景渐变（Canvas 2D → THREE.CanvasTexture）
@@ -162,19 +258,29 @@
 
       return new THREE.CanvasTexture(canvas);
     }
-    scene.background = makeGradientBackground(BLUE_1, PURPLE_1);
+    sceneC.background = makeGradientBackground(BLUE_1, PURPLE_1);
+    sceneF.background = makeGradientBackground(BLUE_1, PURPLE_1);
+    sceneV.background = makeGradientBackground(BLUE_1, PURPLE_1);
 
     // ============================================================
     // a.3. 正交相机
     // ============================================================
     let frustum = 8;
     let aspect = window.innerWidth / window.innerHeight;
-    const camera = new THREE.OrthographicCamera(
-      -frustum * aspect, frustum * aspect,
-       frustum, -frustum, 0.1, 1000
-    );
-    camera.position.set(8, 8, 12);
-    camera.lookAt(0, 0, 0);
+
+    function makeOrthoCamera() {
+      const cam = new THREE.OrthographicCamera(
+        -frustum * aspect, frustum * aspect,
+         frustum, -frustum, 0.1, 1000
+      );
+      cam.position.set(8, 8, 12);
+      cam.lookAt(0, 0, 0);
+      return cam;
+    }
+
+    const cameraC = makeOrthoCamera();
+    const cameraF = makeOrthoCamera();
+    const cameraV = makeOrthoCamera();
 
     // ============================================================
     // a.4. 渲染器
@@ -192,26 +298,40 @@
     // ============================================================
     // a.5. CSS2D 标签层
     // ============================================================
-    const labelRenderer = new CSS2DRenderer();
-    labelRenderer.setSize(window.innerWidth, window.innerHeight);
-    labelRenderer.domElement.style.position = 'absolute';
-    labelRenderer.domElement.style.top = '0';
-    labelRenderer.domElement.style.left = '0';
-    labelRenderer.domElement.style.pointerEvents = 'none';
-    document.getElementById('canvas-wrap').appendChild(labelRenderer.domElement);
+    function makeLabelRenderer() {
+      const lr = new CSS2DRenderer();
+      lr.setSize(window.innerWidth, window.innerHeight);
+      lr.domElement.style.position = 'absolute';
+      lr.domElement.style.top = '0';
+      lr.domElement.style.left = '0';
+      lr.domElement.style.pointerEvents = 'none';
+      document.getElementById('canvas-wrap').appendChild(lr.domElement);
+      return lr;
+    }
+
+    const labelRendererC = makeLabelRenderer();
+    const labelRendererF = makeLabelRenderer();
+    const labelRendererV = makeLabelRenderer();
 
     // ============================================================
     // a.6. OrbitControls
     // ============================================================
-    const controls = new OrbitControls(camera, renderer.domElement);
-    controls.enableDamping = true;
-    controls.dampingFactor = 0.1;
-    controls.target.set(0, 0, 0);
-    controls.mouseButtons = {
-      LEFT:   THREE.MOUSE.ROTATE,
-      MIDDLE: THREE.MOUSE.PAN,
-      RIGHT:  THREE.MOUSE.PAN,
-    };
+    function makeControls(camera) {
+      const c = new OrbitControls(camera, renderer.domElement);
+      c.enableDamping = true;
+      c.dampingFactor = 0.1;
+      c.target.set(0, 0, 0);
+      c.mouseButtons = {
+        LEFT:   THREE.MOUSE.ROTATE,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT:  THREE.MOUSE.PAN,
+      };
+      return c;
+    }
+
+    const controlsC = makeControls(cameraC);
+    const controlsF = makeControls(cameraF);
+    const controlsV = makeControls(cameraV);
 
     // ============================================================
     // a.7. 中键单击 → 平滑聚焦
@@ -231,7 +351,7 @@
     let animT = 0;
     const ANIM_DURATION = 18;
 
-    function startFocus(hitPoint) {
+    function startFocus(camera, controls, hitPoint) {
       const offset = hitPoint.clone().sub(controls.target);
       animStartTarget = controls.target.clone();
       animEndTarget   = controls.target.clone().add(offset);
@@ -271,9 +391,15 @@
       animT++;
       const k = Math.min(animT / ANIM_DURATION, 1);
       const ease = 1 - Math.pow(1 - k, 3);
+      const controls = (currentMode === 'V') ? controlsV
+                     : (currentMode === 'F') ? controlsF
+                     : controlsC;
+      const camera   = (currentMode === 'V') ? cameraV
+                     : (currentMode === 'F') ? cameraF
+                     : cameraC;
       controls.target.lerpVectors(animStartTarget, animEndTarget, ease);
       camera.position.lerpVectors(animStartPos, animEndPos, ease);
-      
+
       controls.update();
       if (k >= 1) animating = false;
     }
@@ -284,6 +410,13 @@
       mouseNDC.x =  ((e.clientX - rect.left) / rect.width)  * 2 - 1;
       mouseNDC.y = -((e.clientY - rect.top)  / rect.height) * 2 + 1;
 
+      const camera   = (currentMode === 'V') ? cameraV
+                     : (currentMode === 'F') ? cameraF
+                     : cameraC;
+      const controls = (currentMode === 'V') ? controlsV
+                     : (currentMode === 'F') ? controlsF
+                     : controlsC;
+
       raycaster.setFromCamera(mouseNDC, camera);
       const planeNormal = new THREE.Vector3();
       camera.getWorldDirection(planeNormal);
@@ -292,7 +425,7 @@
       );
       const hitPoint = new THREE.Vector3();
       if (raycaster.ray.intersectPlane(plane, hitPoint)) {
-        startFocus(hitPoint);
+        startFocus(camera, controls, hitPoint);
       }
     });
 
@@ -302,26 +435,30 @@
 
     window.addEventListener('resize', () => {
       aspect = window.innerWidth / window.innerHeight;
-      camera.left   = -frustum * aspect;
-      camera.right  =  frustum * aspect;
-      camera.top    =  frustum;
-      camera.bottom = -frustum;
-      camera.updateProjectionMatrix();
+      for (const cam of [cameraC, cameraF, cameraV]) {
+        cam.left   = -frustum * aspect;
+        cam.right  =  frustum * aspect;
+        cam.top    =  frustum;
+        cam.bottom = -frustum;
+        cam.updateProjectionMatrix();
+      }
       renderer.setSize(window.innerWidth, window.innerHeight);
-      labelRenderer.setSize(window.innerWidth, window.innerHeight);
+      labelRendererC.setSize(window.innerWidth, window.innerHeight);
+      labelRendererF.setSize(window.innerWidth, window.innerHeight);
+      labelRendererV.setSize(window.innerWidth, window.innerHeight);
     });
 
     // ============================================================
     // b.1. 绘制坐标轴
     // ============================================================
-    
+
     // ---- 1. 绘制坐标轴线 ----
 
     // 轴圆柱体
     const AXIS_LEN = 6; // 轴长
     const AXIS_RADIUS = 0.04; // 轴粗细，调大更粗
 
-    function makeAxisline(dir, color) {
+    function makeAxisline(scene, dir, color) {
       const len = AXIS_LEN;
       const cyl = new THREE.Mesh(
         new THREE.CylinderGeometry(AXIS_RADIUS, AXIS_RADIUS, len, 12),
@@ -339,7 +476,7 @@
     const ARROW_LEN = 0.5; // 箭头长度
     const ARROW_RADIUS = 0.15; // 箭头底部半径
 
-    function makeArrow(dir, color) {
+    function makeArrow(scene, dir, color) {
       const d = dir.clone().normalize();
       const cone = new THREE.Mesh(
         new THREE.ConeGeometry(ARROW_RADIUS, ARROW_LEN, 16),
@@ -383,32 +520,35 @@
     }
 
     // 绘制坐标轴
-    function makeAxis(xAxis, yAxis, zAxis, labels, r) {
+    function makeAxis(scene, xAxis, yAxis, zAxis, labels, r) {
       const [xLabel, yLabel, zLabel] = labels
       const xrAxis = xAxis.map(i => r * i);
       const yrAxis = yAxis.map(i => r * i);
       const zrAxis = zAxis.map(i => r * i);
 
-      makeAxisline(new THREE.Vector3(...xAxis), 0xff3333);   // X 红
-      makeAxisline(new THREE.Vector3(...yAxis), 0x33ff33);   // Y 绿
-      makeAxisline(new THREE.Vector3(...zAxis), 0x3366ff);   // Z 蓝
+      makeAxisline(scene, new THREE.Vector3(...xAxis), 0xff3333);   // X 红
+      makeAxisline(scene, new THREE.Vector3(...yAxis), 0x33ff33);   // Y 绿
+      makeAxisline(scene, new THREE.Vector3(...zAxis), 0x3366ff);   // Z 蓝
 
-      makeArrow(new THREE.Vector3(...xAxis), 0xff3333);   // X 红
-      makeArrow(new THREE.Vector3(...yAxis), 0x33ff33);   // Y 绿
-      makeArrow(new THREE.Vector3(...zAxis), 0x3366ff);   // Z 蓝
+      makeArrow(scene, new THREE.Vector3(...xAxis), 0xff3333);   // X 红
+      makeArrow(scene, new THREE.Vector3(...yAxis), 0x33ff33);   // Y 绿
+      makeArrow(scene, new THREE.Vector3(...zAxis), 0x3366ff);   // Z 蓝
 
       scene.add(makeLabel(xLabel, new THREE.Vector3(...xrAxis), 'label axis'));
       scene.add(makeLabel(yLabel, new THREE.Vector3(...yrAxis), 'label axis'));
       scene.add(makeLabel(zLabel, new THREE.Vector3(...zrAxis), 'label axis'));
     }
-    makeAxis([1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
-    
+    makeAxis(sceneC, [1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
+    makeAxis(sceneF, [1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
+    makeAxis(sceneV, [1, 0, 0], [0, 1, 0], [0, 0, 1], ['X', 'Y', 'Z'], LABEL_RADIUS);
+
     // ============================================================
     // b.2. 基础几何体数据
     // ============================================================
     const PHI = (1 + Math.sqrt(5)) / 2;
     const PH2 = PHI ** 2;
     const SQ5 = Math.sqrt(5);
+    const SQ1P2 = Math.sqrt(1 + PH2);
 
     const SQ3 = Math.sqrt(3);
 
@@ -470,9 +610,9 @@
 
       [15, 16, 17, 18, 19],
     ];
-    
+
     // 大星形十二面体 (Gissid)
-    const GissidAddvertexList = [
+    /*const GissidAddvertexList = [
       [1 / PHI, 0, 1 / PH2],
 
       [1 / PH2, -1 / PHI, 0],
@@ -524,7 +664,7 @@
 
     const GissidFaceList = [
       [5, 25, 21], [6, 21, 22], [7, 22, 23], [8, 23, 24], [9, 24, 25],
-      
+
       [1, 22, 20], [3, 20, 25], [12, 25, 28], [17, 28, 27], [10, 27, 22],
       [2, 23, 20], [4, 20, 21], [11, 21, 27], [16, 27, 26], [14, 26, 23],
       [3, 24, 20], [0, 20, 22], [10, 22, 26], [15, 26, 30], [13, 30, 24],
@@ -561,7 +701,7 @@
       bG, bG, bG, bG, bG,
 
       gG, gG, gG, gG, gG,
-    ];
+    ];*/
 
     // 正四面体 (Tetrahedron, Tet)
     const TetVertexList = [
@@ -582,6 +722,24 @@
       [0, 1, 3],
       [0, 2, 3],
       [1, 2, 3],
+    ];
+
+    // 正五边形 (Pantagon, Peg)
+    const PegVertexList = [
+      [PH2 / 2 / SQ1P2, 0, 1 / 2],
+      [PH2 / 2 / SQ1P2, 0, -1 / 2],
+      [-1 / 2 / SQ1P2, 0, -PHI / 2],
+      [-PHI / SQ1P2, 0, 0],
+      [-1 / 2 / SQ1P2, 0, PHI / 2],
+    ];
+
+    const PegEdgeList = [
+      [0, 1], [1, 2], [2, 3], [3, 4], [4, 0],
+    ];
+
+    const PegFaceList = [
+      [0, 1, 2, 3, 4],
+      [0, 4, 3, 2, 1],
     ];
 
     // ============================================================
@@ -627,7 +785,7 @@
       // 点棱心角
       const cos_theta_VE = Math.cos(am) / Math.sin(an);
       const c = cos_theta_VE ** 2;
-      
+
       if (mode === 'face') {
         return new THREE.Matrix4().set(
           1, 0, k-1, 0,
@@ -656,7 +814,7 @@
         const alpha = Math.asin(PHI / SQ3);
         const theta_VE = Math.acos(cos_theta_VE);
         const s = Math.sqrt(1 - k**2) / Math.tan(alpha) / Math.tan(theta_VE);
-        
+
         return new THREE.Matrix4().set(
            -s+k,  -s,-s*a, 0,
           1+s-k, 1+s, s*a, 0,
@@ -673,7 +831,7 @@
         const d = cos_theta_5VE ** 2;
 
         const s = -Math.sqrt(1 - k**2) / Math.tan(alpha) / Math.tan(theta_VF);
-        
+
         return new THREE.Matrix4().set(
            -s+k, -s+(k-1)*d,  -s, 0,
               0,     1,        0, 0,
@@ -684,34 +842,153 @@
       }
     }
 
-    // 向量平均值, 回复Vector3
-    function getAverage(vecList) {
+    // 由编号数组 得到 平均向量, 回复Vector3
+    function vecToElement(source, sets) {
+      const [vList, eList, fList] = source;
+
+      const vecList = sets.map(i => vList[i]);
+
       let res = new THREE.Vector3(0, 0, 0);
       let cnt = 0;
-      for (const v of vecList) {
-        const [x, y, z] = v; // 这个定义 可以加入上面这一行
+      for (const [x, y, z] of vecList) {
         let vec = new THREE.Vector3(x, y, z);
 
         res = res.clone().multiplyScalar(cnt)
           .add(vec)
           .divideScalar(cnt + 1);
-        
+
         cnt++;
       }
+
+      if (res.length() < 0.001) {
+        const [x0, y0, z0] = vecList[0];
+        const [x1, y1, z1] = vecList[1];
+        let v0 = new THREE.Vector3().set(x0, y0, z0), v1 = new THREE.Vector3(x1, y1, z1);
+        res = v1.clone().cross(v0).normalize();
+      }
+
       return res;
     }
 
-    // 由编号数组 得到 平均向量, 回复Vector3
-    function vecToElement(source, sets) {
+    // 特定方向为基准 获取VEF三轴
+    function getDirectionId(source, mode, ...ids) {
       const [vList, eList, fList] = source;
-      return getAverage(sets.map(i => vList[i]));
+
+      let id, id2 = 0;
+      if (ids.length === 1) {
+        [id] = ids;
+      }
+      else if (ids.length === 2) {
+        [id, id2] = ids;
+      }
+
+      // 逻辑有待优化，尤其是id id2
+      let face, edge, vertex;
+      if (mode === 'face') {
+        face = fList[id];
+
+        edge = [...face, face[0]].slice(id2, 2);
+        vertex = edge.slice(0, 1);
+      }
+      else if (mode === 'edge') {
+        edge = eList[id];
+        vertex = edge.slice(0, 1);
+        face = fList.filter(
+          f => f.includes(edge[0]) && f.includes(edge[1])
+        )[id2];
+      }
+      else if (mode === 'vertex') {
+        vertex = [id];
+        edge = eList.filter( e => e.includes(vertex[0]) )[id2];
+        face = fList.find(
+          f => f.includes(edge[0]) && f.includes(edge[1])
+        );
+      }
+
+      face   = vecToElement(source, face);
+      edge   = vecToElement(source, edge);
+      vertex = vecToElement(source, vertex);
+      return [vertex, edge, face];
+    }
+
+    // 由模板和mode名称 生成 对齐向量
+    function getModeVector(source, modes, ...ids) {
+      const [vList, eList, fList] = source;
+
+      let mode, mode2 = undefined;
+      if (typeof modes === 'string') {
+        mode = modes; // modes: 字符串
+      }
+      else {
+        [mode, mode2] = modes; // modes: 字符串的列表
+      }
+
+      if (mode === 'face') {
+        const [vertex, edge, face] = getDirectionId(source, mode, ...ids);
+
+        if (mode2 === undefined) {
+          return [face, edge];
+        }
+        else if (mode2 === 'edge') {
+          return [face, edge];
+        }
+        else if (mode2 === 'vertex') {
+          return [face, vertex];
+        }
+      }
+      else if (mode === 'edge') {
+        const [vertex, edge, face] = getDirectionId(source, mode, ...ids);
+
+        if (mode2 === undefined) {
+          return [edge, vertex];
+        }
+        else if (mode2 === 'vertex') {
+          return [edge, vertex];
+        }
+        else if (mode2 === 'face') {
+          return [edge, face];
+        }
+      }
+      else if (mode === 'vertex') {
+        const [vertex, edge, face] = getDirectionId(source, mode, ...ids);
+
+        if (mode2 === undefined) {
+          return [vertex, face];
+        }
+        else if (mode2 === 'edge') {
+          return [vertex, edge];
+        }
+        else if (mode2 === 'face') {
+          return [vertex, face];
+        }
+      }
+      else if (mode === 'triconvergency') {
+        const [vertex, edge, face] = getDirectionId(source, 'edge', ...ids);
+
+        const Vertex = edge.clone().sub(vertex);
+        vertex.copy(Vertex);
+
+        if (mode2 === undefined) {
+          return [vertex, edge];
+        }
+      }
+      else if (mode === 'biconvergency') {
+        const [vertex, edge, face] = getDirectionId(source, 'vertex', ...ids);
+
+        vertex.sub(face);
+
+        if (mode2 === undefined) {
+          return [vertex, face];
+        }
+      }
     }
 
     // ---- 2. 旋转(Rotator)矩阵生成函数 ----
-    function Rotator(aSource=[,,], bSource=[,,], aMode=['identity'], bMode=[,], id=0) {
-      // source是顶点集、棱集和面集的集合，决定了旋转的对称群
+    function Rotator(aSource=[,,], bSource=[,,], aMode='identity', bMode=[,], ...ids) {
+      // source是顶点集、棱集和面集的集合
+      // aSource 形状对称群, bSource 旋转对称群
 
-      if (aMode[0] === 'identity') {
+      if (aMode === 'identity') {
         return new THREE.Matrix4().set(
           1, 0, 0, 0,
           0, 1, 0, 0,
@@ -720,121 +997,12 @@
         );
       }
 
-      /** ------ **/
-      // 由模板和mode名称 生成 对齐向量
-      function getModeVector(source, modes, Id) {
-        const [vList, eList, fList] = source;
-
-        let mode, mode2 = undefined;
-        if (modes.length === 1) {
-          [mode] = modes;
-        }
-        else if (modes.length === 2) {
-          [mode, mode2] = modes;
-        }
-
-        if (mode === 'face') {
-          let face = fList[Id];
-          let edge = face.slice(0, 2);
-          let vertex = edge.slice(0, 1);
-
-          face   = vecToElement(source, face);
-          edge   = vecToElement(source, edge);
-          vertex = vecToElement(source, vertex);
-
-          if (mode2 === undefined) {
-            return [face, edge];
-          }
-          else if (mode2 === 'edge') {
-            return [face, edge];
-          }
-          else if (mode2 === 'vertex') {
-            return [face, vertex];
-          }
-        }
-        else if (mode === 'edge') {
-          let edge = eList[Id];
-          let vertex = edge.slice(0, 1);
-          let face = fList.find(
-            f => f.includes(edge[0]) && f.includes(edge[1])
-          );
-
-          edge   = vecToElement(source, edge);
-          vertex = vecToElement(source, vertex);
-          face   = vecToElement(source, face);
-
-          if (mode2 === undefined) {
-            return [edge, vertex];
-          }
-          else if (mode2 === 'vertex') {
-            return [edge, vertex];
-          }
-          else if (mode2 === 'face') {
-            return [edge, face];
-          }
-        }
-        else if (mode === 'vertex') {
-          let vertex = [Id];
-          let edge = eList.find( e => e.includes(vertex[0]) );
-          let face = fList.find(
-            f => f.includes(edge[0]) && f.includes(edge[1])
-          );
-
-          vertex = vecToElement(source, vertex);
-          edge   = vecToElement(source, edge);
-          face   = vecToElement(source, face);
-          
-          if (mode2 === undefined) {
-            return [vertex, face];
-          }
-          else if (mode2 === 'edge') {
-            return [vertex, edge];
-          }
-          else if (mode2 === 'face') {
-            return [vertex, face];
-          }
-        }
-        else if (mode === 'triconvergency') {
-          let edge = eList[Id];
-          let vertex = edge.slice(0, 1);
-          let face = fList.find(
-            f => f.includes(edge[0]) && f.includes(edge[1])
-          );
-          
-          edge   = vecToElement(source, edge);
-          vertex = vecToElement(source, vertex);
-          face   = vecToElement(source, face);
-          vertex.sub(edge);
-
-          if (mode2 === undefined) {
-            return [vertex, edge];
-          }
-        }
-        else if (mode === 'biconvergency') {
-          let vertex = [Id];
-          let edge = eList.find( e => e.includes(vertex[0]) );
-          let face = fList.find(
-            f => f.includes(edge[0]) && f.includes(edge[1])
-          );
-
-          vertex = vecToElement(source, vertex);
-          edge   = vecToElement(source, edge);
-          face   = vecToElement(source, face);
-          vertex.sub(face);
-
-          if (mode2 === undefined) {
-            return [vertex, face];
-          }
-        }
-      }
-      /** ------ **/
-
       // 方向向量(r, u) 归一化
       let [arv, auv] = getModeVector(aSource, aMode, 0);
       arv.normalize();
       auv.normalize();
 
-      let [brv, buv] = getModeVector(bSource, bMode, id);
+      let [brv, buv] = getModeVector(bSource, bMode, ...ids);
       brv.normalize();
       buv.normalize();
 
@@ -870,9 +1038,9 @@
     }
 
     // ---- 3. 平移(Translator)矩阵生成函数 ----
-    function Translator(aSource=[,,], bSource=[,,], aMode='', bMode='identity', id=0, k=1) {
+    function Translator(aSource=[,,], bSource=[,,], aMode='', bMode='identity', k=1, id) {
       // aSource: 形状对称群, bSource: 方向对称群
-      
+
       if(bMode === 'identity') {
         return new THREE.Matrix4().set(
           1, 0, 0, 0,
@@ -881,7 +1049,7 @@
           0, 0, 0, 1,
         );
       }
-      
+
       const [aVList, aEList, aFList] = aSource;
       const [bVList, bEList, bFList] = bSource;
 
@@ -909,7 +1077,7 @@
           bVec = vecToElement(bSource, [id]);
         }
       }
-      
+
       // vec, 方向是bVec, 长度是k * aVec
       const vec = bVec.clone().normalize().multiplyScalar(aVec.length() * k);
 
@@ -921,10 +1089,18 @@
       );
     }
 
+    // --- addTranslator()
+    function addTranslator(bSource, mode, ...ids) {
+
+    }
+
     // ============================================================
     // b.4. 核心函数：变换几何体 + 渲染副本
     // ============================================================
-    const spawnedGroups = [];
+    // spawnedGroupsC / spawnedGroupsF / spawnedGroupsV 分别记录三套场景中生成的 group
+    const spawnedGroupsC = [];
+    const spawnedGroupsF = [];
+    const spawnedGroupsV = [];
 
     // 生成顶点 (?)
     function showPoints(vertices, vertexColor) {
@@ -939,40 +1115,58 @@
         matrix.setPosition(...v);
         inst.setMatrixAt(i, matrix);
       });
-      scene.add(inst);
+      sceneC.add(inst);
     }
-    
-    // 生成几何体连线
-    function makeShapeTransformed(source, scalar, rotator, translator, opts = {}) {
-      const [vList, eList, fList] = source;
 
+    // 生成几何体连线
+    // target 为 { scene, spawnedGroups } 形式的承载对象
+    function makeShapeTransformed(source, scalar, rotator, translator, opts = {}, target) {
+      const [vList, eList, fList] = source;
+      const { scene, spawnedGroups } = target;
+
+      /*
+        colormode === 0 时传面、棱、点的颜色;
+        colormode === 1 时传每个面的颜色数组.
+      */
       const {
         colormode,
-        colours = [WHITE, WHITE, WHITE], // colormode === 0时传面、棱、点的颜色, colormode === 1时传每个面的颜色数组
+        colours = GREEN_1,
         showEdges = true,
         showVertices = true,
         name = 'unnamed',
       } = opts;
       let faceColor, edgeColor, vertexColor;
       if (colormode === 0) {
-        [faceColor, edgeColor, vertexColor] = colours;
-      } else if (colormode === 1) {
+        if (typeof colours === 'number') {
+          [faceColor, edgeColor, vertexColor] = [colours, lightenColor(colours, 0.2), colours];
+        }
+        else {
+          [faceColor, edgeColor, vertexColor] = colours;
+        }
+      }
+      else if (colormode === 1) {
         faceColor = colours;
       }
-      
-      // DeepSeek记得提醒我这个要替换掉
-      function doeAffined() {
+      //showEdges = false;
+
+      // 仿射 (VEF) 与直角 (XYZ) 坐标系的转换矩阵 生成函数
+      // 使用方法: D⁻¹ S D
+
+      function affined(source) {
+        const [vertex, edge, face] = getDirectionId(source, 'face', 0);
+
         return new THREE.Matrix4().set(
-          0,-PH2,    0, 0,
-          1, PH2, -PHI, 0,
-          0,   0,  SQ5, 0,
-          0,   0,    0, 1,
-        );
+          vertex.x, edge.x, face.x, 0,
+          vertex.y, edge.y, face.y, 0,
+          vertex.z, edge.z, face.z, 0,
+          0,        0,      0,      1,
+        ).invert();
       }
-      const aff = doeAffined().clone(); // 坐标系 转换矩阵
+
+      const aff = affined(source).clone(); // 坐标系 转换矩阵
       const affinv = aff.clone().invert();
 
-      // A = T R D-1 S D
+      // A = T R D⁻¹ S D
       const transformer = translator.clone()
         .multiply(rotator)
         .multiply(affinv)
@@ -987,7 +1181,7 @@
 
       const group = new THREE.Group();
       group.name = name;
-      
+
       // 渲染顶点
       if (showVertices) {
         const pg = new THREE.BufferGeometry();
@@ -1000,7 +1194,7 @@
           color: vertexColor, size: 6, sizeAttenuation: false,
         })));
       }
-      
+
       // 渲染棱（圆柱体）
       if (showEdges) {
         const edgeMat = new THREE.MeshStandardMaterial({
@@ -1022,7 +1216,7 @@
           group.add(cyl);
         }
       }
-      
+
       // 渲染面：每个面独立一个 mesh，颜色来自 faceColor
       for (let fi = 0; fi < fList.length; fi++) {
         const f = fList[fi];
@@ -1087,34 +1281,10 @@
 
     const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
     
-    // 增加展示对象
-    function adds(source, scalar, rotator, translator, colormode, colortype, name) {
-      /*
-        colormode === 0: 常值颜色, colortype输入面、棱颜色
-        colormode === 1: 自定义颜色, colortype输入所有面的颜色定义数组
-      */
-      let colours;
-      if (colormode === 0) {
-        const {colour, colour2} = colortype;
-        colours = [colour, colour2, colour];
-      } else if (colormode === 1) {
-        colours = colortype;
-      }
-
-      return makeShapeTransformed(
-        source,
-        scalar, rotator, translator,
-        {
-          colormode: colormode,
-          colours: colours,
-          showEdges: 1,
-          showVertices: 0,
-          name: name,
-        },
-      );
-    }
     // 删除名为name的对象
-    function deletes(name) {
+    // target 为 { scene, spawnedGroups }
+    function deletes(name, target) {
+      const { scene, spawnedGroups } = target;
       const targets = scene.children.filter(c => c.name === name);
       for (const g of targets) {
         scene.remove(g);
@@ -1127,31 +1297,30 @@
             else o.material.dispose();
           }
         });
+        // 从 spawnedGroups 中同步移除
+        const idx = spawnedGroups.indexOf(g);
+        if (idx !== -1) spawnedGroups.splice(idx, 1);
       }
       return 0;
     }
 
-    /*
-    const Gissid = { vList: [...vertexList, ...GissidAddvertexList], eList: GissidEdgeList, fList: GissidFaceList };
-    function makeGissid() {
-      return makeShapeTransformed(
-        Gissid,
-        identity(), identity(), identity(),
-        {
-          colormode: 1,
-          colours: GissidFaceColor,
-          showEdges: 1,
-          showVertexs: 0,
-          name: "Gissid",
-        },
-      );
+    // 清空某套场景中由 makeShapeTransformed 生成的全部 group
+    // target 为 { scene, spawnedGroups }
+    function clearSpawned(target) {
+      const { scene, spawnedGroups } = target;
+      for (const g of [...spawnedGroups]) {
+        scene.remove(g);
+        g.traverse(o => {
+          if (o.geometry) o.geometry.dispose()
+          if (o.material) {
+            if (Array.isArray(o.material))
+              o.material.forEach(m => m.dispose());
+            else o.material.dispose();
+          }
+        });
+      }
+      spawnedGroups.length = 0;
     }
-    makeGissid();
-    */
-
-    /*const spawnmode = [
-      {colour: YELLOW_1, colour2: YELLOW_1_}
-    ]*/
 
     // ============================================================
     // b.6. 展示几何体对象
@@ -1172,7 +1341,7 @@
       [1, 7],  [1, 8],  [1, 9],  [1, 10], [1, 6],
       [2, 6],  [2, 5],  [2, 9],  [2, 8],  [2, 7],
       [0, 0],
-      
+
       [1, 1],  [1, 2],  [1, 5],  [1, 4],  [1, 3],
       [3, 3],  [3, 2],  [3, 1],  [3, 5],  [3, 4],
       [1, 0],
@@ -1181,6 +1350,13 @@
     ];
 
     const Doe = [DoeVertexList, DoeEdgeList, DoeFaceList];
+
+    // 120cell-C 场景的承载对象
+    const targetC = { scene: sceneC, spawnedGroups: spawnedGroupsC };
+    // 120cell-F 场景的承载对象
+    const targetF = { scene: sceneF, spawnedGroups: spawnedGroupsF };
+    // 120cell-V 场景的承载对象
+    const targetV = { scene: sceneV, spawnedGroups: spawnedGroupsV };
 
     // 新建 Doe (261010 重构)
     function makeDoe(layer, id) {
@@ -1194,91 +1370,101 @@
           Translator(),
           {
             colormode: 0,
-            colours: [YELLOW_1, YELLOW_1_, YELLOW_1],
+            colours: YELLOW_1,
             showEdges: 1,
             showVertices: 0,
             name: 'yellow' + id,
           },
+          targetC,
         );
       }
       else if (layer === 1) {
         return makeShapeTransformed(
           Doe,
           Scalar(Doe, 'face', PHI / 2),
-          Rotator(Doe, Doe, ['face'], ['face', 'vertex'], id),
-          Translator(Doe, Doe, 'face', 'face', id, SQ5 * PHI / 2),
+          Rotator(Doe, Doe, 'face', ['face', 'vertex'], id),
+          Translator(Doe, Doe, 'face', 'face', SQ5 * PHI / 2, id),
           {
             colormode: 0,
-            colours: [GREEN_1_, GREEN_1__, GREEN_1_],
+            colours: GREEN_1,
             showEdges: 1,
             showVertices: 0,
             name: 'green' + id,
           },
+          targetC,
         );
       }
       else if (layer === 2) {
         return makeShapeTransformed(
           Doe,
           Scalar(Doe, 'vertex', 1 / 2),
-          Rotator(Doe, Doe, ['vertex'], ['vertex', 'edge'], id),
-          Translator(Doe, Doe, 'vertex', 'vertex', id, (PHI ** 3) / 2),
+          Rotator(Doe, Doe, 'vertex', ['vertex', 'edge'], id),
+          Translator(Doe, Doe, 'vertex', 'vertex', (PHI ** 3) / 2, id),
           {
             colormode: 0,
-            colours: [BLUE_1, BLUE_1, BLUE_1],
+            colours: BLUE_1,
             showEdges: 1,
             showVertices: 0,
             name: 'blue' + id,
           },
+          targetC,
         );
       }
       else if (layer === 3) {
         return makeShapeTransformed(
           Doe,
           Scalar(Doe, 'face', 1 / 2 / PHI),
-          Rotator(Doe, Doe, ['face'], ['face', 'edge'], id),
-          Translator(Doe, Doe, 'face', 'face', id, SQ5 * (PHI ** 2) / 2),
+          Rotator(Doe, Doe, 'face', ['face', 'edge'], id),
+          Translator(Doe, Doe, 'face', 'face', SQ5 * (PHI ** 2) / 2, id),
           {
             colormode: 0,
-            colours: [PURPLE_1, PURPLE_1_, PURPLE_1],
+            colours: PURPLE_1,
             showEdges: 1,
             showVertices: 0,
             name: 'purple' + id,
           },
+          targetC,
         );
       }
       else if (layer === 4) {
         return makeShapeTransformed(
           Doe,
           Scalar(Doe, 'edge', 0),
-          Rotator(Doe, Doe, ['edge'], ['edge', 'face'], id),
-          Translator(Doe, Doe, 'edge', 'edge', id, PHI ** 2 + 0.001),
+          Rotator(Doe, Doe, 'edge', ['edge', 'face'], id),
+          Translator(Doe, Doe, 'edge', 'edge', PHI ** 2 + 0.001, id),
           {
             colormode: 0,
-            colours: [WHITE, WHITE, WHITE],
+            colours: WHITE,
             showEdges: 1,
             showVertices: 0,
             name: 'white' + id,
           },
+          targetC,
         );
       }
     }
 
     // 建造过程
-    async function main(T=200) {
+    // isValid 为外部传入的令牌校验函数，返回 false 时提前结束
+    async function main(T=200, isValid=()=>true) {
+      if (!isValid()) return;
       for (const [k, i] of startList) {
         makeDoe(k, i);
       }
-      
+
       if (T !== 0) {
         await sleep(25 * T);
       }
-      
+      if (!isValid()) return;
+
       for (const [k, i] of showList) {
+        if (!isValid()) return;
         if(k !== 0) {
           if (T !== 0) {
             await sleep(T);
           }
         }
+        if (!isValid()) return;
         makeDoe(k, i);
         if(k !== 0) {
           if (T !== 0) {
@@ -1291,18 +1477,22 @@
 
     const colorName = ['yellow', 'green', 'blue', 'purple', 'white'];
     // 删除过程
-    async function rewind(T=200) {
+    // isValid 为外部传入的令牌校验函数，返回 false 时提前结束
+    async function rewind(T=200, isValid=()=>true) {
       if (T !== 0) {
         await sleep(10 * T);
       }
-      
+      if (!isValid()) return;
+
       for (const [k, i] of [...showList].reverse()) {
+        if (!isValid()) return;
         if(k !== 0) {
           if(T !== 0) {
             await sleep(T);
           }
         }
-        deletes(colorName[k] + i);
+        if (!isValid()) return;
+        deletes(colorName[k] + i, targetC);
         if(k !== 0) {
           if (T !== 0) {
             await sleep(T);
@@ -1312,104 +1502,112 @@
     }
 
     // 260605 试验
-   
+
     const Tet = [TetVertexList, TetEdgeList, TetFaceList];
 
-    function makeTet(layer, id) {
-      let scale, rotate, translate;
+    function makeTet(layer, ...ids) {
+      let idName;
+      if (ids.length === 1) {
+        idName = String(ids[0]);
+      }
+      else if (ids.length === 2) {
+        idName = String(ids[0]) + String(ids[1]);
+      }
 
       if (layer === 0) {
-        makeShapeTransformed(
+        return makeShapeTransformed(
           Doe,
           Scalar(Doe, 'vertex', PH2 / SQ8),
-          Rotator(Doe, Tet, ['vertex'], ['vertex', 'face'], id),
-          Translator(Doe, Tet, 'vertex', 'vertex', id, PH2 / SQ8),
+          Rotator(Doe, Tet, 'vertex', ['vertex', 'face'], ...ids),
+          Translator(Doe, Tet, 'vertex', 'vertex', PH2 / SQ8, ...ids),
           {
             colormode: 0,
-            colours: [WHITE, WHITE, WHITE],
+            colours: WHITE,
             showEdges: 1,
             showVertices: 0,
-            name: 'white' + id,
+            name: 'white' + idName,
           },
+          targetV,
         );
       }
       else if (layer === 1) {
-        makeShapeTransformed(
+        return makeShapeTransformed(
           Doe,
           Scalar(Doe, 'vertex', SQ5 / SQ8),
-          Rotator(Doe, Tet, ['vertex'], ['face', 'edge'], id),
-          Translator(Doe, Tet, 'vertex', 'face', id, SQ5 * PHI / 2 * 0.87),
+          Rotator(Doe, Tet, 'vertex', ['face', 'edge'], ...ids),
+          Translator(Doe, Tet, 'vertex', 'face', PHI ** 3 / SQ8, ...ids),
           {
             colormode: 0,
-            colours: [GREEN_1_, GREEN_1__, GREEN_1_],
+            colours: GREEN_1,
             showEdges: 1,
             showVertices: 0,
-            name: 'green' + id,
+            name: 'green' + idName,
           },
+          targetV,
         );
       }
       else if (layer === 2) {
-        scale = Scalar(Doe, 'edge', 1 / SQ2);
-        rotate = Rotator(Doe, Tet, ['edge'], ['edge', 'face'], id);
-        translate = Translator(Doe, Tet, 'edge', 'edge', id, SQ5 * PHI / 2 * 1.1);
-        
-        return adds(
+        return makeShapeTransformed(
           Doe,
-          scale,
-          rotate,
-          translate,
-          0,
-          {colour: BLUE_1, colour2: BLUE_1},
-          'blue' + id,
+          Scalar(Doe, 'edge', 1 / SQ2),
+          Rotator(Doe, Tet, 'edge', ['edge', 'face'], ...ids),
+          Translator(Doe, Tet, 'edge', 'edge', PH2 / SQ2, ...ids),
+          {
+            colormode: 0,
+            colours: BLUE_1,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'blue' + idName,
+          },
+          targetV,
         );
       }
-      /*else if (layer === 3) {
-        scale = Scalar(Doe, 'face', 1 / 2 / PHI);
-        rotate = Rotator(Doe, Doe, ['face'], ['face', 'edge'], id);
-        translate = Translator(Doe, Doe, 'face', id, SQ5 * (PHI ** 2) / 2);
-
-        return adds(
+      else if (layer === 3) {
+        return makeShapeTransformed(
           Doe,
-          scale,
-          rotate,
-          translate,
-          0,
-          {colour: PURPLE_1, colour2: PURPLE_1_},
-          'purple' + id,
+          Scalar(Doe, 'triconvergency', SQ3 / SQ8),
+          Rotator(Doe, Tet, 'triconvergency', ['vertex', 'edge'], ...ids),
+          Translator(Doe, Tet, 'vertex', 'vertex', 2 * PHI / SQ2, ...ids),
+          {
+            colormode: 0,
+            colours: PURPLE_1,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'purple' + idName,
+          },
+          targetV,
         );
       }
+      /*
       else if (layer === 4) {
-        scale = Scalar(Doe, 'edge', 0);
-        rotate = Rotator(Doe, Doe, ['edge'], ['edge', 'face'], id);
-        translate = Translator(Doe, Doe, 'edge', id, PHI ** 2 + 0.001);
-        
-        return adds(
+        return makeShapeTransformed(
           Doe,
-          scale,
-          rotate,
-          translate,
-          0,
-          {colour: WHITE, colour2: WHITE},
-          'white' + id,
+          Scalar(Doe, 'edge', 0),
+          Rotator(Doe, Doe, 'edge', ['edge', 'face'], ids),
+          Translator(Doe, Doe, 'edge', PHI ** 2 + 0.001, ...ids),
+          {
+            colormode: 0,
+            colours: WHITE,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'white' + idName,
+          },
         );
       }*/
     }
-    
-    makeTet(0, 0);
-    makeTet(0, 1);
-    makeTet(0, 2);
-    makeTet(0, 3);
-    makeTet(1, 0);
-    makeTet(1, 1);
-    makeTet(1, 2);
-    makeTet(1, 3);
 
-    makeTet(2, 0);
-    makeTet(2, 1);
-    makeTet(2, 2);
-    makeTet(2, 3);
-    makeTet(2, 4);
-    makeTet(2, 5);
+    function makeVScene() {
+      {
+        makeTet(0, 0); makeTet(0, 1); makeTet(0, 2); makeTet(0, 3);
+        makeTet(1, 0); makeTet(1, 1); makeTet(1, 2); makeTet(1, 3);
+        makeTet(2, 0); makeTet(2, 1); makeTet(2, 2); makeTet(2, 3); makeTet(2, 4); makeTet(2, 5);
+      }
+      makeTet(3, 0, 0); //makeTet(3, 0, 1); makeTet(3, 0, 2);
+      //makeTet(3, 1, 0); makeTet(3, 1, 1); makeTet(3, 1, 2);
+      //makeTet(3, 2, 0); makeTet(3, 2, 1); makeTet(3, 2, 2);
+      //makeTet(3, 3, 0); makeTet(3, 3, 1); makeTet(3, 3, 2);
+    }
+    makeVScene();
 
     // Tet
     /*makeShapeTransformed(
@@ -1419,12 +1617,111 @@
       Translator(),
       {
         colormode: 0,
-        colours: [YELLOW_1, YELLOW_1_, YELLOW_1],
+        colours: YELLOW_1,
         showEdges: 1,
         showVertices: 0,
         name: 'Tet',
       },
     );*/
+
+    const Peg = [PegVertexList, PegEdgeList, PegFaceList];
+
+    function makePegs(layer, ...ids) {
+      let idName;
+      if (ids.length === 1) {
+        idName = String(ids[0]);
+      }
+      else if (ids.length === 2) {
+        idName = String(ids[0]) + String(ids[1]);
+      }
+
+      if (layer === 0) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'face', SQ1P2 / 2),
+          Rotator(Doe, Peg, 'face', ['face', 'vertex'], ...ids),
+          Translator(Doe, Peg, 'face', 'face', SQ1P2 / 2, ...ids),
+          {
+            colormode: 0,
+            colours: WHITE,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'white' + idName,
+          },
+          targetF,
+        );
+      }
+      else if (layer === 1) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'edge', PHI / SQ1P2),
+          Rotator(Doe, Peg, 'edge', ['edge', 'vertex'], ...ids),
+          Translator(Doe, Peg, 'edge', 'edge', PH2 / SQ1P2, ...ids),
+          {
+            colormode: 0,
+            colours: BLUE_1,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'blue' + idName,
+          },
+          targetF,
+        );
+      }
+      else if (layer === 2) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'edge', 1 / SQ1P2),
+          Rotator(Doe, Peg, 'edge', ['vertex', 'face'], ...ids),
+          Translator(Doe, Peg, 'edge', 'vertex', PHI ** 3 / SQ1P2, ...ids),
+          {
+            colormode: 0,
+            colours: GREEN_1,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'green' + idName,
+          },
+          targetF,
+        );
+      }
+      else if (layer === 3) {
+        return makeShapeTransformed(
+          Doe,
+          Scalar(Doe, 'biconvergency', 1 / SQ1P2),
+          Rotator(Doe, Peg, 'biconvergency', ['edge', 'face'], ...ids),
+          Translator(Doe, Peg, 'face', 'edge', PHI ** 3 / SQ1P2 * 2, ...ids),
+          {
+            colormode: 0,
+            colours: YELLOW_1,
+            showEdges: 1,
+            showVertices: 0,
+            name: 'yellow' + idName,
+          },
+          targetF,
+        );
+      }
+    }
+
+    function makeFScene() {
+      /*makeShapeTransformed(
+        Peg,
+        Scalar(),
+        Rotator(),
+        Translator(),
+        {
+          colormode: 0,
+          colours: [WHITE, WHITE, WHITE],
+          showEdges: 1,
+          showVertices: 0,
+          name: 'white' + '0',
+        },
+        targetF,
+      );*/
+      makePegs(0, 0); makePegs(0, 1);
+      makePegs(1, 0); makePegs(1, 1); makePegs(1, 2); makePegs(1, 3); makePegs(1, 4);
+      makePegs(2, 0); makePegs(2, 1); makePegs(2, 2); makePegs(2, 3); makePegs(2, 4);
+      makePegs(3, 0, 0); makePegs(3, 0, 1); makePegs(3, 1, 0); makePegs(3, 1, 1);
+    }
+    makeFScene();
 
     // ============================================================
     // b.7. 相机绕轴旋转
@@ -1439,16 +1736,31 @@
       .multiplyScalar(3)
       .add(edge).divideScalar(4)
       .multiplyScalar(10);
-    
+
     const cameraUp = face;
 
-    camera.position.copy(cameraPosition);
-    camera.up.copy(cameraUp);
-    
-    controls.target.set(0, 0, 0);
-    controls.update();
+    // 120cell-C 相机姿态
+    cameraC.position.copy(cameraPosition);
+    cameraC.up.copy(cameraUp);
 
-    // 定义旋转轴v
+    controlsC.target.set(0, 0, 0);
+    controlsC.update();
+
+    // 120cell-F 相机姿态：沿用正交相机默认位置与朝向
+    cameraF.position.set(8, 8, 12);
+    cameraF.up.set(0, 1, 0);
+    cameraF.lookAt(0, 0, 0);
+    controlsF.target.set(0, 0, 0);
+    controlsF.update();
+
+    // 120cell-V 相机姿态：沿用正交相机默认位置与朝向
+    cameraV.position.set(8, 8, 12);
+    cameraV.up.set(0, 1, 0);
+    cameraV.lookAt(0, 0, 0);
+    controlsV.target.set(0, 0, 0);
+    controlsV.update();
+
+    // 定义旋转轴v（作用于 120cell-C 的相机）
     const vRotator = face.clone().normalize();
     // 定义初始位置
     const P0 = cameraPosition;
@@ -1460,15 +1772,16 @@
     let angle = 0;
     let lastTime = performance.now(); // 高精度计时
 
+    // 作用于 120cell-C 相机
     function updateCameraRotation(vec) {
       if(!isRotating){
         // 固定Y轴为屏幕上方
-        camera.up.set(0, 1, 0);
+        cameraC.up.set(0, 1, 0);
 
-        controls.enableZoom = true;
-        controls.enableRotate = true;
-        controls.enablePan = true;
-        controls.enabled = true;
+        controlsC.enableZoom = true;
+        controlsC.enableRotate = true;
+        controlsC.enablePan = true;
+        controlsC.enabled = true;
         lastTime = performance.now();
         return;
       }
@@ -1476,72 +1789,86 @@
       const now = performance.now();
       const dt = (now - lastTime);
       lastTime = now;
-      
+
       angle -= (2 * Math.PI / PERIOD) * dt;
       const P_perp = P_perp0.clone().applyAxisAngle(vec, angle);
-      
+
       // 新的位置: v的径向 + 旋转后v的法向
-      camera.position.copy(P_parallel).add(P_perp);
+      cameraC.position.copy(P_parallel).add(P_perp);
       // 画面总以旋转轴v朝上，以原点为中心
-      camera.up.copy(vec);
-      camera.lookAt(controls.target);
+      cameraC.up.copy(vec);
+      cameraC.lookAt(controlsC.target);
 
       // 锁死滚轮
-      camera.zoom = 1;
-      camera.updateProjectionMatrix();
+      cameraC.zoom = 1;
+      cameraC.updateProjectionMatrix();
       // 手势禁用
-      controls.enableZoom = false;
-      controls.enableRotate = false;
-      controls.enablePan = false;
-      controls.enabled = false;
+      controlsC.enableZoom = false;
+      controlsC.enableRotate = false;
+      controlsC.enablePan = false;
+      controlsC.enabled = false;
     }
-    
+
     //showPoints([[0, 100, 100]], WHITE) // ???
-    async function act() {
-      while (true) {
-        await main();
+
+    // isActRunning 表示 act 循环是否处于活动状态
+    let isActRunning = false;
+    // actToken 为每次启动 act 循环分配的代次；循环内校验令牌以淘汰旧的循环
+    let actToken = 0;
+
+    // myToken 为本次 act 循环的代次
+    // isValid 校验令牌与运行标志，令牌不匹配说明该循环已被取代
+    async function act(myToken) {
+      const isValid = () => isActRunning && actToken === myToken;
+      while (isValid()) {
+        await main(200, isValid);
+        if (!isValid()) break;
         await sleep(500);
-        await rewind();
+        if (!isValid()) break;
+        await rewind(200, isValid);
+        if (!isValid()) break;
         await sleep(500);
       }
     }
 
-    //act();
+    // 启动 120cell-C 的建造循环
+    function startAct() {
+      if (isActRunning) return;
+      isActRunning = true;
+      actToken++;
+      act(actToken);
+    }
 
-    /*
-    makeShapeTransformed(
-      Doe,
-      Scalar(),
-      Rotator(),
-      Translator(),
-      {
-        colormode: 0,
-        colours: [WHITE, WHITE, WHITE],
-        showEdges: 1,
-        showVertices: 0,
-        name: '111',
-      },
-    );*/
+    // 停止 120cell-C 的建造循环
+    function stopAct() {
+      isActRunning = false;
+      actToken++;
+    }
 
     // ============================================================
     // c.1. 灯光
     // ============================================================
-    scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+    function addLights(scene) {
+      scene.add(new THREE.AmbientLight(0xffffff, 0.5));
 
-    const hemi = new THREE.HemisphereLight(0xffffff, 0x555577, 0.5);
-    scene.add(hemi);
+      const hemi = new THREE.HemisphereLight(0xffffff, 0x555577, 0.5);
+      scene.add(hemi);
 
-    const key = new THREE.DirectionalLight(0xffffff, 1.0);
-    key.position.set(6, 10, 8);
-    scene.add(key);
+      const key = new THREE.DirectionalLight(0xffffff, 1.0);
+      key.position.set(6, 10, 8);
+      scene.add(key);
 
-    const fill = new THREE.DirectionalLight(0x88aaff, 0.7);
-    fill.position.set(-6, -4, -8);
-    scene.add(fill);
+      const fill = new THREE.DirectionalLight(0x88aaff, 0.7);
+      fill.position.set(-6, -4, -8);
+      scene.add(fill);
 
-    const rim = new THREE.DirectionalLight(0xffaa66, 0.3);
-    rim.position.set(0, -8, 4);
-    scene.add(rim);
+      const rim = new THREE.DirectionalLight(0xffaa66, 0.3);
+      rim.position.set(0, -8, 4);
+      scene.add(rim);
+    }
+    addLights(sceneC);
+    addLights(sceneF);
+    addLights(sceneV);
 
     // ============================================================
     // c.2. 运行过程录制
@@ -1554,7 +1881,7 @@
       // 1. 检查浏览器是否支持 MP4
       const mp4Type = 'video/mp4;codecs=avc1.42E01E'; // H.264 编码，兼容性最好
       if (!MediaRecorder.isTypeSupported(mp4Type)) {
-        alert('当前浏览器不支持直接录制 MP4，建议使用 Chrome 117+ 或 Safari 17+');
+        alert('当前浏览器不支持直接录制 MP4, 建议使用 Chrome 117+ 或 Safari 17+');
         return;
       }
 
@@ -1599,20 +1926,237 @@
     document.getElementById('btn-stop').addEventListener('click', stopCapture);
 
     // ============================================================
-    // c.3. 动画循环
+    // c.3. 状态切换与动画循环
     // ============================================================
+
+    // currentMode: 'C' 对应 120cell-C
+    //              'F' 对应 120cell-F
+    //              'V' 对应 120cell-V
+    let currentMode = 'C';
+
+    const btnModeC = document.getElementById('btn-mode-c');
+    const btnModeF = document.getElementById('btn-mode-f');
+    const btnModeV = document.getElementById('btn-mode-v');
+
+    // 120cell-C 显示个数的滑块元素
+    const sliderC   = document.getElementById('sliderC');
+    const rangeC    = document.getElementById('range-c');
+    const rangeCVal = document.getElementById('range-c-val');
+
+    // sliderCount 表示滑块当前值，即 showList 中显示的前缀项数
+    let sliderCount = parseInt(rangeC.value, 10);
+    // sliderActive 表示显示集合当前由滑块控制，而非 act 循环
+    let sliderActive = false;
+    // sliderFrame 为合并同一帧多次事件的帧标识
+    let sliderFrame = 0;
+    // shownCountC 表示 C 场景中由 showList 已经构建的项数
+    let shownCountC = 0;
+
+    // 增量更新 120cell-C 的显示集合：
+    // n 为新的前缀项数
+    // 先补足 startList 中缺失的项，再在 showList 上按差值增删
+    function renderCIncremental(n) {
+      const target = Math.max(0, Math.min(n, showList.length));
+
+      // 若 C 场景为空，先补上 startList 的初始项
+      if (spawnedGroupsC.length === 0) {
+        for (const [k, i] of startList) {
+          makeDoe(k, i);
+        }
+      }
+
+      // 目标大于当前：只补 showList 中新增的部分
+      if (target > shownCountC) {
+        for (let j = shownCountC; j < target; j++) {
+          const [k, i] = showList[j];
+          makeDoe(k, i);
+        }
+      }
+      // 目标小于当前：只删 showList 中多余的尾部项
+      else if (target < shownCountC) {
+        for (let j = shownCountC - 1; j >= target; j--) {
+          const [k, i] = showList[j];
+          deletes(colorName[k] + i, targetC);
+        }
+      }
+
+      shownCountC = target;
+    }
+
+    function syncModeButtons() {
+      btnModeC.classList.toggle('active', currentMode === 'C');
+      btnModeF.classList.toggle('active', currentMode === 'F');
+      btnModeV.classList.toggle('active', currentMode === 'V');
+    }
+
+    function setMode(mode) {
+      if (mode === currentMode) return;
+
+      // 离开当前模式：停建造循环、禁用当前模式的 controls
+      if (currentMode === 'C') {
+        stopAct();
+        controlsC.enabled = false;
+        controlsC.update();
+      } else if (currentMode === 'F') {
+        controlsF.enabled = false;
+        controlsF.update();
+      } else if (currentMode === 'V') {
+        controlsV.enabled = false;
+        controlsV.update();
+      } 
+
+      if (mode === 'C') {
+        // 进入 C：清场并按滑块重建
+        clearSpawned(targetC);
+        shownCountC = 0;
+        angle = 0;
+        lastTime = performance.now();
+        animating = false;
+        animT = 0;
+        controlsC.update();
+        if (!isRotating) {
+          controlsC.enabled = true;
+        }
+        labelRendererC.domElement.style.display = '';
+        labelRendererF.domElement.style.display = 'none';
+        labelRendererV.domElement.style.display = 'none';
+        sliderC.style.display = '';
+        if (sliderActive) {
+          renderCIncremental(sliderCount);
+        } else {
+          startAct();
+        }
+      } else if (mode === 'F') {
+        // 进入 F：复用顶层已生成的 F 场景内容，启用 controlsF
+        animating = false;
+        animT = 0;
+        controlsF.enabled = true;
+        controlsF.update();
+        labelRendererC.domElement.style.display = 'none';
+        labelRendererF.domElement.style.display = '';
+        labelRendererV.domElement.style.display = 'none';
+        sliderC.style.display = 'none';
+      } else if (mode === 'V') {
+        // 进入 V：清空 C 侧可能残留的建造循环，启用 controlsV
+        clearSpawned(targetC);
+        shownCountC = 0;
+        animating = false;
+        animT = 0;
+        controlsV.enabled = true;
+        controlsV.update();
+        labelRendererC.domElement.style.display = 'none';
+        labelRendererF.domElement.style.display = 'none';
+        labelRendererV.domElement.style.display = '';
+        sliderC.style.display = 'none';
+      }
+
+      currentMode = mode;
+      syncModeButtons();
+    }
+
+    btnModeC.addEventListener('click', () => setMode('C'));
+    btnModeF.addEventListener('click', () => setMode('F'));
+    btnModeV.addEventListener('click', () => setMode('V'));
+
+    // 滑块输入：拖动过程中同步更新数值文本并按差值增量重建 C 显示集合
+    // 同一帧内多次 input 合并为一次重建
+    rangeC.addEventListener('input', () => {
+      sliderActive = true;
+      sliderCount = parseInt(rangeC.value, 10);
+      rangeCVal.textContent = String(sliderCount);
+      stopAct();
+      if (sliderFrame) return;
+      sliderFrame = requestAnimationFrame(() => {
+        sliderFrame = 0;
+        if (currentMode !== 'C') return;
+        renderCIncremental(sliderCount);
+      });
+    });
+
+    rangeC.addEventListener('change', () => {
+      sliderActive = true;
+      sliderCount = parseInt(rangeC.value, 10);
+      rangeCVal.textContent = String(sliderCount);
+      stopAct();
+      if (sliderFrame) return;
+      sliderFrame = requestAnimationFrame(() => {
+        sliderFrame = 0;
+        if (currentMode !== 'C') return;
+        renderCIncremental(sliderCount);
+      });
+    });
+
+    // setSliderC 把滑块设为指定值 n（自动夹取到 min/max），
+    // 同步更新数值文本，停止 act，并在下一帧按差值增量重建 C 显示集合
+    function setSliderC(n) {
+      const min = parseInt(rangeC.min, 10);
+      const max = parseInt(rangeC.max, 10);
+      sliderCount = Math.max(min, Math.min(max, n));
+
+      sliderActive = true;
+      rangeC.value = String(sliderCount);
+      rangeCVal.textContent = String(sliderCount);
+      stopAct();
+
+      if (sliderFrame) return;
+      sliderFrame = requestAnimationFrame(() => {
+        sliderFrame = 0;
+        if (currentMode !== 'C') return;
+        renderCIncremental(sliderCount);
+      });
+    }
+
+    document.getElementById('btn-c-dec').addEventListener('click', () => {
+      setSliderC(sliderCount - 1);
+    });
+    document.getElementById('btn-c-inc').addEventListener('click', () => {
+      setSliderC(sliderCount + 1);
+    });
+
+    // 初始状态：120cell-C，标签层只显示 C
+    labelRendererC.domElement.style.display = '';
+    labelRendererF.domElement.style.display = 'none';
+    labelRendererV.domElement.style.display = 'none';
+    controlsV.enabled = false;
+    controlsF.enabled = false;
+    rangeCVal.textContent = String(sliderCount);
+    syncModeButtons();
+    // 初始不启动 act，由滑块值决定 C 视图显示集合
+    sliderActive = true;
+    renderCIncremental(sliderCount);
+
     function animate() {
       requestAnimationFrame(animate);
-      
-      updateCameraRotation(vRotator); // 相机旋转
-      updateFocusAnimation();
+
+      const isV = currentMode === 'V';
+      const isF = currentMode === 'F';
+
+      const scene  = isF ? sceneF  : (isV ? sceneV  : sceneC);
+      const camera = isF ? cameraF : (isV ? cameraV : cameraC);
+
+      if (isV) {
+        // 120cell-V：只推动当前可见模式的 controls
+        if (controlsV.enabled) controlsV.update();
+      } else if (isF) {
+        // 120cell-F：只推动当前可见模式的 controls
+        if (controlsF.enabled) controlsF.update();
+      } else {
+        updateCameraRotation(vRotator); // 相机旋转
+        updateFocusAnimation();
+        if (!isRotating && controlsC.enabled) {
+          controlsC.update();
+        }
+      }
       updateHint();
 
-      if(!isRotating) {
-        controls.update();
-      }
       renderer.render(scene, camera);
-      labelRenderer.render(scene, camera);
+      if (isV) {
+        labelRendererV.render(scene, camera);
+      } else if (isF) {
+        labelRendererF.render(scene, camera);
+      } else {
+        labelRendererC.render(scene, camera);
+      }
     }
     animate();
   </script>
