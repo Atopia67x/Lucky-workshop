@@ -16,7 +16,7 @@
 A visual and interactive project dedicated to the <mark>120-cell</mark>~ \
 目前服务于 <mark>正一百二十胞体</mark> 的可视化交互项目～ 
 
-## 120cell·3D-engine
+## 120-cell · 3D-engine
 <mark>正一百二十胞体的3D引擎</mark>
 
 <kbd>How do I make it?</kbd> \
@@ -26,14 +26,15 @@ Hand-derived ***math*** · AI-assisted ***code*** \
 ### 功能实现与短期计划（2026.10）
 请参考[开发日志](./开发日志.md)，可运行的[HTML源代码](./index.html)
 
-- [x] 3D引擎的页面 (10.1)
-- [x] 120cell胞向投影 零件的生成与删除 (10.2)
-- [x] 相机自动绕轴旋转 (10.3)
-- [x] 旋转函数的重构 (10.10)
-- [ ] 平移函数的重构
-- [ ] 120cell顶点向投影 零件的生成方法
-- [ ] 展开交互的页内按钮
-- [ ] 跳转的跨页按钮
+- [x] 创建 3D 引擎的页面 (10.1)
+- [x] 120-cell 零件的生成与删除 (10.2)
+- [x] 实现 相机自动绕轴旋转 (10.3)
+- [x] 重构 旋转函数 (10.10-17)
+- [x] 引入 交互按钮 (10.17)
+- [x] 引入 多场景切换按钮 (10.17)
+- [ ] 重构 平移函数
+- [ ] 代码板块 index.html 重构与拆分文件
+- [ ] 120-cell 顶点向投影 零件的生成方法
 - [ ] 其他页面美术设计
 
 致谢：\
@@ -41,4 +42,4 @@ Hand-derived ***math*** · AI-assisted ***code*** \
 DeepSeek (AI辅助)
 
 项目持续更新中！ \
-*Being updated…*(◍＞◡＜◍)
+*Being updated…* (◍＞◡＜◍)
