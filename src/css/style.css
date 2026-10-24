@@ -1,0 +1,159 @@
+/**
+ * 文件：css/style.css
+ * 包含 120-Cell 引擎的全局样式, UI 按钮布局, 滑块和标签的排版。
+ * 只有视觉样式，不包含任何 JS 逻辑。
+ */
+
+* { box-sizing: border-box; }
+body {
+  margin: 0;
+  overflow: hidden;
+  background: #111;
+  font-family: system-ui, sans-serif;
+  color: #eee;
+}
+#canvas-wrap { position: fixed; inset: 0; }
+#hint {
+  position: fixed;
+  left: 50%;
+  bottom: 16px;
+  transform: translateX(-50%);
+  z-index: 20;
+  padding: 8px 14px;
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid #444;
+  border-radius: 8px;
+  font-size: 12px;
+  color: #aaa;
+  backdrop-filter: blur(6px);
+  pointer-events: none;
+}
+#hint b { color: #6cf; }
+#hint.recording {
+  color: #ff4444;
+  border-color: #ff4444;
+  background: rgba(60, 0, 0, 0.85);
+}
+#hint.recording b {
+  color: #ff6666;
+}
+
+#ui {
+  position: fixed;
+  top: 20px;
+  right: 20px;
+  z-index: 30;
+  display: flex;
+  gap: 8px;
+}
+#ui button {
+  padding: 8px 14px;
+  background: #222;
+  color: #eee;
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+}
+#ui button:active {
+  transform: scale(0.96);
+}
+#ui button.active {
+  background: #6cf;
+  color: #111;
+  border-color: #6cf;
+}
+#ui button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* 顶部目录：三个状态切换 */
+#topnav {
+  position: fixed;
+  top: 20px;
+  left: 20px;
+  z-index: 30;
+  display: flex;
+  gap: 8px;
+}
+#topnav button {
+  padding: 8px 14px;
+  background: #222;
+  color: #eee;
+  border: 1px solid #444;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: monospace;
+}
+#topnav button:active {
+  transform: scale(0.96);
+}
+#topnav button.active {
+  background: #6cf;
+  color: #111;
+  border-color: #6cf;
+}
+
+/* 120cell-C 的显示个数滑块 */
+#sliderC {
+  position: fixed;
+  bottom: 64px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 30;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: rgba(30, 30, 30, 0.85);
+  border: 1px solid #444;
+  border-radius: 6px;
+  font-size: 12px;
+  color: #aaa;
+  backdrop-filter: blur(6px);
+}
+#sliderC button {
+  width: 26px;
+  height: 22px;
+  padding: 0;
+  background: #222;
+  color: #eee;
+  border: 1px solid #444;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 13px;
+  font-family: monospace;
+  line-height: 1;
+}
+#sliderC button:active {
+  transform: scale(0.94);
+}
+#sliderC input[type="range"] {
+  width: 160px;
+}
+#sliderC .val {
+  min-width: 2ch;
+  color: #6cf;
+  font-family: monospace;
+}
+
+/* 3D 悬浮标签样式 */
+.label {
+  color: #6cf;
+  font-family: monospace;
+  font-size: 12px;
+  background: rgba(0,0,0,0.65);
+  padding: 1px 5px;
+  border-radius: 4px;
+  border: 1px solid #6cf;
+  pointer-events: none;
+  user-select: none;
+  white-space: nowrap;
+}
+.label.axis { 
+  color: #ff6; 
+  border-color: #ff6; 
+  font-size: 13px; 
+}
