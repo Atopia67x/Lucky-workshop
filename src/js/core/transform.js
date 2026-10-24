@@ -2,7 +2,7 @@
  * 文件: js/core/transform.js
  * 包含 120-Cell 引擎的矩阵生成函数: 缩放 (Scalar) · 旋转 (Rotator) · 平移 (Translator)
  * 以及配套的方向向量与 VEF 三轴工具 (vecToElement / getDirectionId / getModeVector)
- * 仅依赖 three 与 data 层常量、形状拼装, 不涉及 DOM · 场景 ·运行状态
+ * 仅依赖 three 与 data 层常量、形状拼装, 不涉及 DOM · 场景 · 运行状态
  */
 
 import * as THREE from 'three';
@@ -148,7 +148,7 @@ export function vecToElement(source, sets) {
   return res;
 }
 
-// 特定方向为基准 获取VEF三轴
+// 特定方向为基准 获取 VEF 三轴
 export function getDirectionId(source, mode, ...ids) {
   const [vList, eList, fList] = source;
 
@@ -160,7 +160,7 @@ export function getDirectionId(source, mode, ...ids) {
     [id, id2] = ids;
   }
 
-  // 逻辑有待优化, 尤其是id id2
+  // 逻辑有待优化, 尤其是 id id2
   let face, edge, vertex;
   if (mode === 'face') {
     face = fList[id];
@@ -189,7 +189,7 @@ export function getDirectionId(source, mode, ...ids) {
   return [vertex, edge, face];
 }
 
-// 由模板和mode名称 生成 对齐向量
+// 由模板和 mode 名称 生成 对齐向量
 export function getModeVector(source, modes, ...ids) {
   const [vList, eList, fList] = source;
 
@@ -263,8 +263,8 @@ export function getModeVector(source, modes, ...ids) {
 
 // ---- 2. 旋转 (Rotator) 矩阵 生成函数 ----
 export function Rotator(aSource=[,,], bSource=[,,], aMode='identity', bMode=[,], ...ids) {
-  // source是顶点集、棱集和面集的集合
-  // aSource 形状对称群, bSource 旋转对称群
+  // source 是顶点集、棱集和面集的集合
+  // aSource: 形状对称群, bSource: 旋转对称群
 
   if (aMode === 'identity') {
     return new THREE.Matrix4().set(

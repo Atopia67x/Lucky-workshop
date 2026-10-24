@@ -1,6 +1,6 @@
 /**
  * 文件: js/core/renderer.js
- * 核心渲染, 接收 几何数据和变换矩阵, 生成 Three.js 的 Group。
+ * 核心渲染, 接收 几何数据和变换矩阵, 生成 Three.js 的 Group
  */
 
 import * as THREE from 'three';

@@ -1,6 +1,6 @@
 /**
- * 文件：js/core/recorder.js
- * 实现 MP4 录制, 并在录制期间 自动绕轴旋转。
+ * 文件: js/core/recorder.js
+ * 实现 MP4 录制, 并在录制期间 自动绕轴旋转
  */
 
 import * as THREE from 'three';

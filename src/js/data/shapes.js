@@ -1,6 +1,6 @@
 /**
  * 文件: js/data/shapes.js
- * 包含 Doe, Tet, Peg 等基础多面体的 顶点 (Vertex) · 棱 (Edge) · 面(Face) 原始数据
+ * 包含 Doe · Tet · Peg 等基础多面体的 顶点 (Vertex) · 棱 (Edge) · 面(Face) 原始数据
  */
 
 import { PHI, PH2, SQ5, SQ1P2, SQ8 } from './constants.js';

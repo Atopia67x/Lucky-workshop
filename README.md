@@ -1,5 +1,5 @@
 # Welcome to *Lucky workshop*!
-欢迎来到 <mark>*络琪 玩具厂*</mark>!
+欢迎来到 <mark>*络琪 玩具厂*</mark> !
 
 - Personal *magical* works~ ₍^˶ ╸𖥦  ╸˵^₎⟆\
 存放个人神秘作品的地方~
